@@ -29,8 +29,11 @@ uploaded_file = None
 
 # 로컬 파일이 있으면 사용, 없으면 업로드 받기
 if os.path.exists(excel_file_path):
-    # 로컬 파일 자동 사용 (체크박스 숨김)
-    uploaded_file = excel_file_path
+    use_local = st.checkbox("로컬 파일 사용 (주간회의록.xlsx)", value=True)
+    if use_local:
+        uploaded_file = excel_file_path
+    else:
+        uploaded_file = st.file_uploader("주간 회의록 엑셀 파일 업로드", type=['xlsx', 'xls'])
 else:
     uploaded_file = st.file_uploader("주간 회의록 엑셀 파일 업로드", type=['xlsx', 'xls'])
 
@@ -47,73 +50,31 @@ if uploaded_file is not None:
         # 시트 목록 확인
         sheet_names = xls.sheet_names
         
-        # 11월 시트 자동 찾기
+        # 11월 및 12월 시트 자동 찾기
         november_sheet = None
-        for sheet in sheet_names:
-            if '11월' in sheet or '11' in sheet or 'november' in sheet.lower() or 'nov' in sheet.lower():
-                november_sheet = sheet
-                break
-        
-        # 12월 시트 자동 찾기 (11월 시트가 없을 경우)
         december_sheet = None
-        if not november_sheet:
-            for sheet in sheet_names:
-                if '12월' in sheet or '12' in sheet or 'december' in sheet.lower() or 'dec' in sheet.lower():
-                    december_sheet = sheet
-                    break
+        for sheet in sheet_names:
+            if '11월' in sheet or ('11' in sheet and '월' in sheet) or 'november' in sheet.lower() or 'nov' in sheet.lower():
+                november_sheet = sheet
+            if '12월' in sheet or ('12' in sheet and '월' in sheet) or 'december' in sheet.lower() or 'dec' in sheet.lower():
+                december_sheet = sheet
         
-        # 시트 선택 (11월 또는 12월 시트가 있으면 기본값으로 설정)
-        if november_sheet:
-            # st.success(f"✅ 11월 데이터 시트 발견: **{november_sheet}**")  # 숨김
-            selected_sheet = st.selectbox("시트 선택", sheet_names, index=sheet_names.index(november_sheet))
-        elif december_sheet:
-            # st.success(f"✅ 12월 데이터 시트 발견: **{december_sheet}**")  # 숨김
-            selected_sheet = st.selectbox("시트 선택", sheet_names, index=sheet_names.index(december_sheet))
+        # 시트 선택 (12월 시트가 있으면 기본값으로 설정, 없으면 11월 시트)
+        default_sheet = december_sheet if december_sheet else november_sheet
+        if default_sheet:
+            selected_sheet = st.selectbox("시트 선택", sheet_names, index=sheet_names.index(default_sheet))
         else:
             selected_sheet = st.selectbox("시트 선택", sheet_names)
-            st.info("💡 11월 또는 12월 시트를 찾지 못했습니다. 시트 이름에 '11월', '12월' 또는 '11', '12'가 포함되어 있는지 확인하세요.")
+            st.info("💡 12월 또는 11월 시트를 찾지 못했습니다. 시트 이름에 '12월', '11월' 또는 '12', '11'이 포함되어 있는지 확인하세요.")
         
         df = pd.read_excel(xls, sheet_name=selected_sheet)
         
-        # P열(16번째 컬럼, 인덱스 15)의 담당자 컬럼을 파트 컬럼으로 변환
-        p_column_index = 15  # P열은 16번째 (0-based index: 15)
-        if len(df.columns) > p_column_index:
-            manager_col_p = df.columns[p_column_index]
-            
-            # 담당자 컬럼을 파트 컬럼으로 변환
-            if manager_col_p in df.columns:
-                # 담당자 이름에 따라 파트 매핑
-                # 맹기열만 2파트, 나머지는 모두 1파트
-                def map_to_part(manager_name):
-                    manager_name = str(manager_name).strip()
-                    # 맹기열인 경우 2파트
-                    if '맹기열' in manager_name:
-                        return '2파트'
-                    # 나머지는 모두 1파트 (빈 값이 아닌 경우)
-                    elif manager_name and manager_name != 'nan' and manager_name != '':
-                        return '1파트'
-                    # 빈 값은 그대로 반환
-                    return ''
-                
-                df['파트'] = df[manager_col_p].astype(str).apply(map_to_part)
-        
-        # 11월 시트인지 확인
-        is_november_sheet = '11월' in selected_sheet or '11' in selected_sheet or 'november' in selected_sheet.lower() or 'nov' in selected_sheet.lower()
-        
-        # 12월 시트인지 확인
-        is_december_sheet = '12월' in selected_sheet or '12' in selected_sheet or 'december' in selected_sheet.lower() or 'dec' in selected_sheet.lower()
-        
-        # 월 표시 텍스트 결정 (12월 시트면 "12월", 11월 시트면 "11월", 아니면 기본값 "11월")
-        if is_december_sheet:
-            month_display = "12월"
-            month_number = 12
-        elif is_november_sheet:
-            month_display = "11월"
-            month_number = 11
-        else:
-            # 기본값은 11월
-            month_display = "11월"
-            month_number = 11
+        # 선택된 시트에서 월 정보 추출
+        selected_month = None
+        if '12월' in selected_sheet or ('12' in selected_sheet and '월' in selected_sheet):
+            selected_month = 12
+        elif '11월' in selected_sheet or ('11' in selected_sheet and '월' in selected_sheet):
+            selected_month = 11
         
         # 스마트공장 시트인지 확인
         is_smart_factory = '스마트공장' in selected_sheet or 'smart' in selected_sheet.lower() or 'factory' in selected_sheet.lower()
@@ -125,8 +86,16 @@ if uploaded_file is not None:
             
             # 업체 컬럼 찾기
             company_columns = [col for col in df.columns if any(keyword in str(col).lower() for keyword in ['업체', 'company', '회사', '고객', 'customer', 'client'])]
-            # 담당자 컬럼 찾기
-            manager_columns = [col for col in df.columns if any(keyword in str(col).lower() for keyword in ['담당자', 'manager', '담당', '담당인', 'contact', '담당자명'])]
+            # 담당자 컬럼 찾기 (P열 우선)
+            # P열(16번째 컬럼, 인덱스 15)이 있으면 우선 사용
+            manager_columns = []
+            if len(df.columns) > 15:
+                p_col = df.columns[15]  # P열 (16번째 컬럼)
+                manager_columns.append(p_col)
+            # 기존 키워드 기반 검색도 추가
+            manager_columns.extend([col for col in df.columns 
+                                   if any(keyword in str(col).lower() for keyword in ['담당자', 'manager', '담당', '담당인', 'contact', '담당자명'])
+                                   and col not in manager_columns])
             # 상담내역 컬럼 찾기
             consultation_columns = [col for col in df.columns if any(keyword in str(col).lower() for keyword in ['상담', 'consultation', '내역', '내용', 'content', '상담내용', '상담내역'])]
             
@@ -157,9 +126,30 @@ if uploaded_file is not None:
                         consultation_col = None
             
             if company_col and manager_col:
-                # 업체별 담당자 집계
-                company_manager = df.groupby([company_col, manager_col]).size().reset_index(name='상담건수')
-                company_manager = company_manager.sort_values([company_col, '상담건수'], ascending=[True, False])
+                # 담당자를 파트로 변환하는 함수
+                def manager_to_part(manager_name):
+                    """담당자 이름을 파트로 변환
+                    - 맹기열 → 2파트
+                    - 박진성, 아름벌, 최승영 및 나머지 모든 담당자 → 1파트
+                    """
+                    if pd.isna(manager_name) or manager_name == '':
+                        return '1파트'
+                    
+                    manager_str = str(manager_name).strip()
+                    
+                    # 맹기열 → 2파트
+                    if '맹기열' in manager_str:
+                        return '2파트'
+                    
+                    # 나머지 모든 담당자 → 1파트 (박진성, 아름벌, 최승영 포함)
+                    return '1파트'
+                
+                # 담당자 컬럼을 파트로 변환
+                df['파트'] = df[manager_col].apply(manager_to_part)
+                
+                # 업체별 파트 집계 (담당자 정보는 유지하되 파트로 그룹화)
+                company_manager = df.groupby([company_col, '파트', manager_col]).size().reset_index(name='상담건수')
+                company_manager = company_manager.sort_values([company_col, '파트', '상담건수'], ascending=[True, True, False])
                 
                 # 업체별 요약
                 company_summary = df.groupby(company_col).agg({
@@ -169,7 +159,7 @@ if uploaded_file is not None:
                 company_summary = company_summary.sort_values('총상담건수', ascending=False)
                 
                 # 통계 카드
-                col_stat1, col_stat2, col_stat3 = st.columns(3)
+                col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
                 with col_stat1:
                     st.metric("총 업체 수", len(company_summary))
                 with col_stat2:
@@ -178,6 +168,10 @@ if uploaded_file is not None:
                     if manager_col:
                         unique_managers = df[manager_col].nunique()
                         st.metric("담당자 수", f"{unique_managers}명")
+                with col_stat4:
+                    # 파트별 통계
+                    part_counts = df['파트'].value_counts()
+                    st.metric("파트 수", f"{len(part_counts)}개")
                 
                 st.markdown("---")
                 
@@ -193,13 +187,13 @@ if uploaded_file is not None:
                 else:
                     filtered_data = company_manager
                 
-                # 테이블 표시
-                display_columns = [company_col, manager_col, '상담건수']
+                # 테이블 표시 (파트 컬럼 포함)
+                display_columns = [company_col, '파트', manager_col, '상담건수']
                 if consultation_col:
                     # 상담내역이 있으면 추가
-                    consultation_summary = df.groupby([company_col, manager_col])[consultation_col].apply(lambda x: ' | '.join(x.dropna().astype(str).unique()[:3])).reset_index()
-                    consultation_summary.columns = [company_col, manager_col, '상담내역_요약']
-                    filtered_data = filtered_data.merge(consultation_summary, on=[company_col, manager_col], how='left')
+                    consultation_summary = df.groupby([company_col, '파트', manager_col])[consultation_col].apply(lambda x: ' | '.join(x.dropna().astype(str).unique()[:3])).reset_index()
+                    consultation_summary.columns = [company_col, '파트', manager_col, '상담내역_요약']
+                    filtered_data = filtered_data.merge(consultation_summary, on=[company_col, '파트', manager_col], how='left')
                     display_columns.append('상담내역_요약')
                 
                 # 천단위 구분 기호 적용
@@ -211,6 +205,47 @@ if uploaded_file is not None:
                     use_container_width=True,
                     height=400
                 )
+                
+                # 파트별 통계
+                st.markdown("---")
+                st.markdown("#### 📊 파트별 통계")
+                
+                col_part1, col_part2 = st.columns(2)
+                
+                with col_part1:
+                    # 파트별 상담건수
+                    part_summary = df.groupby('파트').size().reset_index(name='상담건수')
+                    part_summary = part_summary.sort_values('상담건수', ascending=False)
+                    fig_parts = px.bar(
+                        part_summary,
+                        x='파트',
+                        y='상담건수',
+                        title='파트별 상담건수',
+                        labels={'파트': '파트', '상담건수': '상담건수'},
+                        color='상담건수',
+                        color_continuous_scale='Blues'
+                    )
+                    fig_parts.update_layout(
+                        xaxis_title="파트",
+                        yaxis_title="상담건수",
+                        showlegend=False
+                    )
+                    fig_parts.update_traces(
+                        hovertemplate='<b>%{x}</b><br>상담건수: %{y}건<extra></extra>'
+                    )
+                    st.plotly_chart(fig_parts, use_container_width=True)
+                
+                with col_part2:
+                    # 파트별 비율 (파이 차트)
+                    part_counts = df['파트'].value_counts()
+                    fig_part_pie = px.pie(
+                        values=part_counts.values,
+                        names=part_counts.index,
+                        title='파트별 상담건수 비율',
+                        hole=0.4
+                    )
+                    fig_part_pie.update_traces(textposition='inside', textinfo='percent+label')
+                    st.plotly_chart(fig_part_pie, use_container_width=True)
                 
                 # 업체별 담당자 분포 차트
                 st.markdown("---")
@@ -320,16 +355,19 @@ if uploaded_file is not None:
                 df['년월'] = df[date_col].dt.to_period('M')
                 
                 # 선택된 월 데이터만 필터링 (11월 또는 12월)
-                if '월' in df.columns:
-                    df_month = df[df['월'] == month_number].copy()
-                    if len(df_month) > 0:
-                        st.info(f"📅 {month_display} 총판매 건수 {len(df_month)}건")
-                        df = df_month
+                if '월' in df.columns and selected_month is not None:
+                    df_filtered = df[df['월'] == selected_month].copy()
+                    if len(df_filtered) > 0:
+                        df = df_filtered
+                        # 총 매출이익금은 나중에 계산 후 표시
                     else:
-                        st.warning(f"⚠️ 날짜 컬럼에서 {month_display} 데이터를 찾지 못했습니다. 전체 데이터를 표시합니다.")
+                        st.warning(f"⚠️ 날짜 컬럼에서 {selected_month}월 데이터를 찾지 못했습니다. 전체 데이터를 표시합니다.")
+                elif selected_month is None:
+                    # 시트 이름에서 월을 찾지 못한 경우 전체 데이터 표시
+                    st.info(f"📊 '{selected_sheet}' 시트의 전체 데이터를 표시합니다.")
             else:
                 # 날짜 컬럼이 없으면 시트 이름으로 판단
-                if november_sheet or is_december_sheet:
+                if selected_month is not None:
                     st.info(f"📊 '{selected_sheet}' 시트의 전체 데이터를 표시합니다.")
             
             # 사이드바 필터
@@ -343,14 +381,15 @@ if uploaded_file is not None:
         # 선택된 월 데이터만 표시 중이면 월 필터는 숨김
         if '월' in df.columns:
             months = sorted(df['월'].dropna().unique())
-            if month_number not in months or len(months) > 1:
+            if selected_month is not None and selected_month in months and len(months) == 1:
+                st.sidebar.info(f"📅 {selected_month}월 데이터만 표시 중")
+            else:
                 selected_months = st.sidebar.multiselect("월 선택", months, default=months)
                 df = df[df['월'].isin(selected_months)]
-            else:
-                st.sidebar.info(f"📅 {month_display} 데이터만 표시 중")
             
-            # 목표 달성율 계산
-            st.subheader(f"🎯 {month_display} 목표 달성 현황 (발주서 기준)")
+            # 선택된 월 목표 달성율 계산
+            month_label = f"{selected_month}월" if selected_month is not None else "월"
+            st.subheader(f"🎯 {month_label} 목표 달성 현황")
             
             # 목표 설정
             target_part1 = 17000000  # 1파트 목표: 17,000,000원
@@ -374,27 +413,40 @@ if uploaded_file is not None:
                     if amount_col == "":
                         amount_col = None
         
-        # I열 찾기 (엑셀의 I열 = 9번째 컬럼, 인덱스 8)
-        i_column_index = 8  # I열은 9번째 (0-based index: 8)
-        i_col = None
+        # P열의 담당자 컬럼을 파트로 변환
+        # P열(16번째 컬럼, 인덱스 15)을 담당자 컬럼으로 사용
+        manager_col_for_part = None
+        if len(df.columns) > 15:
+            manager_col_for_part = df.columns[15]  # P열 (16번째 컬럼)
         
-        if len(df.columns) > i_column_index:
-            i_col = df.columns[i_column_index]
-        else:
-            # 방법 2: 컬럼 이름으로 찾기
-            i_columns = [col for col in df.columns if any(keyword in str(col).lower() for keyword in ['업체지급금액', '지급금액', '정산금액', 'payment', 'i열'])]
-            if len(i_columns) > 0:
-                i_col = i_columns[0]
+        # 담당자를 파트로 변환하는 함수
+        def manager_to_part(manager_name):
+            """담당자 이름을 파트로 변환
+            - 맹기열 → 2파트
+            - 박진성, 아름벌, 최승영 및 나머지 모든 담당자 → 1파트
+            """
+            if pd.isna(manager_name) or manager_name == '':
+                return '1파트'
+            
+            manager_str = str(manager_name).strip()
+            
+            # 맹기열 → 2파트
+            if '맹기열' in manager_str:
+                return '2파트'
+            
+            # 나머지 모든 담당자 → 1파트 (박진성, 아름벌, 최승영 포함)
+            return '1파트'
         
-        # 파트 컬럼 찾기 (P열에서 생성한 '파트' 컬럼 우선 사용)
+        # 파트 컬럼 찾기 (기존 파트 컬럼이 있는지 먼저 확인)
         part_columns = [col for col in df.columns if any(keyword in str(col).lower() for keyword in ['파트', 'part'])]
         part_col = None
         
-        # 새로 생성한 '파트' 컬럼이 있으면 우선 사용
-        if '파트' in df.columns:
-            part_col = '파트'
-        elif len(part_columns) > 0:
+        if len(part_columns) > 0:
             part_col = part_columns[0]
+        elif manager_col_for_part is not None:
+            # P열의 담당자 컬럼이 있으면 파트로 변환
+            df['파트'] = df[manager_col_for_part].apply(manager_to_part)
+            part_col = '파트'
         else:
             with st.expander("⚠️ 파트 컬럼을 자동으로 찾지 못했습니다. 수동으로 선택해주세요."):
                 part_col = st.selectbox("파트 컬럼 선택", [""] + list(df.columns), key='part_col')
@@ -414,57 +466,25 @@ if uploaded_file is not None:
             if df[amount_col].dtype == 'object':
                 df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce')
             
-            # 파트 컬럼이 있으면 파트별로 매출총이익 집계
-            if part_col is not None and part_col in df.columns:
-                # 파트 컬럼의 값을 문자열로 변환하고 공백 제거
-                df[part_col] = df[part_col].astype(str).str.strip()
+            if part_col is not None:
+                # 파트 컬럼이 있는 경우
+                # 1파트 데이터 필터링 (1, 1파트, part1 등)
+                part1_mask = (
+                    df[part_col].astype(str).str.contains('1파트|part1|^1$', na=False, regex=True) |
+                    (df[part_col].astype(str).str.strip() == '1')
+                )
+                if part1_mask.any():
+                    part1_achieved = df[part1_mask][amount_col].sum()
+                    part1_count = part1_mask.sum()
                 
-                # NaN이나 빈 값, 'nan' 문자열 제거 후 파트별로 매출총이익 집계
-                # 파트가 비어있지 않은 데이터만 사용
-                df_with_part = df[(df[part_col] != '') & (df[part_col] != 'nan') & (df[part_col].notna())].copy()
-                
-                if len(df_with_part) > 0:
-                    # 파트별로 매출총이익 집계 (groupby 사용)
-                    part_summary = df_with_part.groupby(part_col)[amount_col].agg(['sum', 'count']).reset_index()
-                    part_summary.columns = ['파트', '매출총이익', '건수']
-                    
-                    # 1파트 데이터 찾기 (1파트, part1, 1 등) - 정확한 매칭 우선
-                    part1_mask_filter = (
-                        (part_summary['파트'] == '1파트') |
-                        (part_summary['파트'] == '1') |
-                        part_summary['파트'].str.contains('1파트', na=False, regex=False, case=False) |
-                        part_summary['파트'].str.contains('part1', na=False, regex=False, case=False)
-                    )
-                    part1_rows = part_summary[part1_mask_filter]
-                    
-                    if len(part1_rows) > 0:
-                        part1_achieved = part1_rows['매출총이익'].sum()
-                        part1_count = part1_rows['건수'].sum()
-                        part1_mask = (
-                            (df[part_col] == '1파트') |
-                            (df[part_col] == '1') |
-                            df[part_col].str.contains('1파트', na=False, regex=False, case=False) |
-                            df[part_col].str.contains('part1', na=False, regex=False, case=False)
-                        )
-                    
-                    # 2파트 데이터 찾기 (2파트, part2, 2 등) - 정확한 매칭 우선
-                    part2_mask_filter = (
-                        (part_summary['파트'] == '2파트') |
-                        (part_summary['파트'] == '2') |
-                        part_summary['파트'].str.contains('2파트', na=False, regex=False, case=False) |
-                        part_summary['파트'].str.contains('part2', na=False, regex=False, case=False)
-                    )
-                    part2_rows = part_summary[part2_mask_filter]
-                    
-                    if len(part2_rows) > 0:
-                        part2_achieved = part2_rows['매출총이익'].sum()
-                        part2_count = part2_rows['건수'].sum()
-                        part2_mask = (
-                            (df[part_col] == '2파트') |
-                            (df[part_col] == '2') |
-                            df[part_col].str.contains('2파트', na=False, regex=False, case=False) |
-                            df[part_col].str.contains('part2', na=False, regex=False, case=False)
-                        )
+                # 2파트 데이터 필터링 (2, 2파트, part2 등)
+                part2_mask = (
+                    df[part_col].astype(str).str.contains('2파트|part2|^2$', na=False, regex=True) |
+                    (df[part_col].astype(str).str.strip() == '2')
+                )
+                if part2_mask.any():
+                    part2_achieved = df[part2_mask][amount_col].sum()
+                    part2_count = part2_mask.sum()
             else:
                 # 파트 컬럼이 없는 경우, 전체 데이터를 확인
                 # 사용자가 직접 입력하거나, 다른 방법으로 구분
@@ -482,6 +502,16 @@ if uploaded_file is not None:
             if part_col:
                 st.write(f"**1파트 데이터 건수:** {part1_count}건")
                 st.write(f"**2파트 데이터 건수:** {part2_count}건")
+        
+        # 선택된 월 총 매출이익금 표시 (1파트 + 2파트 합계)
+        if amount_col is not None and '월' in df.columns and selected_month is not None and selected_month in df['월'].values:
+            total_profit = part1_achieved + part2_achieved
+            total_count = len(df)
+            col_info1, col_info2 = st.columns(2)
+            with col_info1:
+                st.info(f"📅 {selected_month}월 총 판매 수량 {total_count:,}건")
+            with col_info2:
+                st.info(f"💰 {selected_month}월 총 매출이익금 {total_profit:,.0f}원")
         
         # 달성율 계산
         achievement_rate_part1 = (part1_achieved / target_part1 * 100) if target_part1 > 0 else 0
@@ -552,312 +582,103 @@ if uploaded_file is not None:
         
         st.markdown("---")
         
-        # KPI 카드
-        st.subheader("📈 핵심 지표 (KPI)")
-        col1, col2, col3, col4 = st.columns(4)
+        # 월간 KPI 요약
+        st.subheader("📊 월간 KPI 요약")
         
-        with col1:
-            st.metric("총 데이터 수", len(df))
+        # J열 찾기 (총 매출, 10번째 컬럼, 인덱스 9)
+        j_column_index = 9  # J열은 10번째 (0-based index: 9)
+        revenue_col = None
+        if len(df.columns) > j_column_index:
+            revenue_col = df.columns[j_column_index]
+        else:
+            st.warning("⚠️ J열(총 매출)을 찾을 수 없습니다.")
         
-        with col2:
-            if '년월' in df.columns:
-                unique_months = df['년월'].nunique()
-                st.metric("보고 기간 (월)", unique_months)
+        # K열 찾기 (매출원가, 11번째 컬럼, 인덱스 10)
+        k_column_index = 10  # K열은 11번째 (0-based index: 10)
+        cost_col = None
+        if len(df.columns) > k_column_index:
+            cost_col = df.columns[k_column_index]
+        else:
+            st.warning("⚠️ K열(매출원가)을 찾을 수 없습니다.")
         
-        with col3:
-            # 숫자형 컬럼이 있으면 평균 계산
-            numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns.tolist()
-            if len(numeric_cols) > 0:
-                avg_value = df[numeric_cols[0]].mean()
-                st.metric(f"{numeric_cols[0]} 평균", f"{avg_value:,.2f}")
+        # N열 찾기 (매출총이익, 14번째 컬럼, 인덱스 13) - 이미 amount_col로 찾았을 수 있음
+        n_column_index = 13  # N열은 14번째 (0-based index: 13)
+        profit_col = None
+        if len(df.columns) > n_column_index:
+            profit_col = df.columns[n_column_index]
+        else:
+            # amount_col이 이미 N열이면 사용
+            if amount_col is not None:
+                profit_col = amount_col
+        
+        # 데이터 타입 변환 및 집계
+        total_revenue = None
+        total_cost = None
+        total_profit = None
+        profit_rate = None
+        
+        if revenue_col is not None:
+            if df[revenue_col].dtype == 'object':
+                df[revenue_col] = pd.to_numeric(df[revenue_col], errors='coerce')
+            total_revenue = df[revenue_col].sum()
+        
+        if cost_col is not None:
+            if df[cost_col].dtype == 'object':
+                df[cost_col] = pd.to_numeric(df[cost_col], errors='coerce')
+            total_cost = df[cost_col].sum()
+        
+        if profit_col is not None:
+            if df[profit_col].dtype == 'object':
+                df[profit_col] = pd.to_numeric(df[profit_col], errors='coerce')
+            total_profit = df[profit_col].sum()
+        
+        # 이익률 계산: 1 - (K열 합계 / J열 합계)
+        if total_revenue is not None and total_revenue > 0 and total_cost is not None:
+            cost_ratio = total_cost / total_revenue
+            profit_rate = (1 - cost_ratio) * 100  # 백분율로 변환
+        
+        # KPI 표시
+        col_kpi1, col_kpi2 = st.columns(2)
+        
+        with col_kpi1:
+            if total_revenue is not None:
+                st.markdown(f"**총 매출:** {total_revenue:,.0f}원")
             else:
-                st.metric("데이터 항목", len(df.columns))
-        
-        with col4:
-            # 숫자형 컬럼이 있으면 합계 계산
-            if len(numeric_cols) > 0:
-                total_value = df[numeric_cols[0]].sum()
-                st.metric(f"{numeric_cols[0]} 합계", f"{total_value:,.0f}")
-            else:
-                st.metric("컬럼 수", len(df.columns))
-        
-        st.markdown("---")
-        
-        # 월별 매출 분석 (N열 기준, 전체 데이터 기반)
-        if amount_col and amount_col in df.columns and '년월' in df.columns:
-            st.subheader("📊 월별 매출 분석")
+                st.markdown("**총 매출:** 데이터 없음")
             
-            # 전체 원본 데이터에서 월별 집계 (필터링 전)
-            if 'original_df' in locals() and len(original_df) > 0:
-                original_df[amount_col] = pd.to_numeric(original_df[amount_col], errors='coerce')
-                if '년월' in original_df.columns:
-                    # N열(매출총이익)을 숫자형으로 변환
-                    original_df[amount_col] = pd.to_numeric(original_df[amount_col], errors='coerce')
-                    
-                    # 년월 컬럼이 없으면 다시 생성
-                    if '년월' not in original_df.columns and len(date_columns) > 0:
-                        date_col = date_columns[0]
-                        if date_col in original_df.columns:
-                            original_df[date_col] = pd.to_datetime(original_df[date_col], errors='coerce')
-                            original_df['년'] = original_df[date_col].dt.year
-                            original_df['월'] = original_df[date_col].dt.month
-                            original_df['년월'] = original_df[date_col].dt.to_period('M')
-                    
-                    # N열(매출총이익)이 있는 데이터만 사용 (NaN과 0 제외)
-                    original_df_with_amount = original_df[
-                        original_df[amount_col].notna() & 
-                        (original_df[amount_col] != 0) &
-                        (original_df[amount_col].abs() > 0.01)  # 매우 작은 값도 제외
-                    ].copy()
-                    
-                    # 12월 제외 (월 컬럼 사용)
-                    if '월' in original_df_with_amount.columns:
-                        original_df_filtered = original_df_with_amount[original_df_with_amount['월'] != 12].copy()
-                    elif '년월' in original_df_with_amount.columns:
-                        # 년월 문자열로 확인
-                        original_df_with_amount['년월_str'] = original_df_with_amount['년월'].astype(str)
-                        original_df_filtered = original_df_with_amount[~original_df_with_amount['년월_str'].str.contains('2024-12|2025-12|12월', na=False, regex=True)].copy()
-                    else:
-                        original_df_filtered = original_df_with_amount.copy()
-                    
-                    # N열 기준으로 월별 집계 (정확한 집계)
-                    # I열도 함께 집계
-                    if '년월' in original_df_filtered.columns and len(original_df_filtered) > 0:
-                        # I열이 있으면 숫자형으로 변환
-                        if i_col and i_col in original_df_filtered.columns:
-                            if original_df_filtered[i_col].dtype == 'object':
-                                original_df_filtered[i_col] = pd.to_numeric(original_df_filtered[i_col], errors='coerce')
-                        
-                        # 년과 월 컬럼을 사용하여 정확하게 월별 집계
-                        if '월' in original_df_filtered.columns and '년' in original_df_filtered.columns:
-                            # 년과 월을 조합하여 정확한 월별 집계
-                            monthly_sales_list = []
-                            for year in sorted(original_df_filtered['년'].dropna().unique()):
-                                for month in range(1, 12):  # 12월 제외
-                                    month_mask = (original_df_filtered['년'] == year) & (original_df_filtered['월'] == month)
-                                    month_data = original_df_filtered[month_mask]
-                                    if len(month_data) > 0:
-                                        # N열 합계
-                                        month_total_n = month_data[amount_col].sum()
-                                        # I열 합계 (I열이 있는 경우)
-                                        month_total_i = 0
-                                        if i_col and i_col in month_data.columns:
-                                            month_total_i = month_data[i_col].sum()
-                                        
-                                        month_period = pd.Period(f'{int(year)}-{month:02d}', freq='M')
-                                        monthly_sales_list.append({
-                                            '년월': month_period, 
-                                            '매출총이익': month_total_n,
-                                            'I열합계': month_total_i if i_col else 0
-                                        })
-                            
-                            if len(monthly_sales_list) > 0:
-                                monthly_sales = pd.DataFrame(monthly_sales_list)
-                                monthly_sales = monthly_sales.sort_values('년월')
-                            else:
-                                monthly_sales = pd.DataFrame(columns=['년월', '매출총이익', 'I열합계'])
-                        else:
-                            # 년월 컬럼만 있는 경우
-                            agg_dict = {amount_col: 'sum'}
-                            if i_col and i_col in original_df_filtered.columns:
-                                agg_dict[i_col] = 'sum'
-                            
-                            monthly_sales = original_df_filtered.groupby('년월', as_index=False).agg(agg_dict)
-                            monthly_sales.columns = ['년월', '매출총이익', 'I열합계'] if i_col else ['년월', '매출총이익']
-                            monthly_sales = monthly_sales.sort_values('년월')
-                            
-                            # I열이 없는 경우 0으로 채우기
-                            if 'I열합계' not in monthly_sales.columns:
-                                monthly_sales['I열합계'] = 0
-                        
-                        # 각 월별 정확한 값으로 업데이트 (2025년 기준)
-                        monthly_amounts = {
-                            '2025-01': 23290017,
-                            '2025-02': 20003838,
-                            '2025-03': 18924280,
-                            '2025-04': 23528759,
-                            '2025-05': 24544760,
-                            '2025-06': 22182939,
-                            '2025-07': 90013289,
-                            '2025-08': 38355057,
-                            '2025-09': 68243253,
-                            '2025-10': 61020050,
-                            '2025-11': 45450249,
-                        }
-                        
-                        # 각 월별로 정확한 값 설정 (N열만 업데이트, I열 합계는 유지)
-                        for month_str, amount in monthly_amounts.items():
-                            month_period = pd.Period(month_str, freq='M')
-                            if month_period in monthly_sales['년월'].values:
-                                # I열 합계는 유지하고 N열만 업데이트
-                                i_sum = monthly_sales.loc[monthly_sales['년월'] == month_period, 'I열합계'].values[0] if 'I열합계' in monthly_sales.columns else 0
-                                monthly_sales.loc[monthly_sales['년월'] == month_period, '매출총이익'] = amount
-                                if 'I열합계' in monthly_sales.columns:
-                                    monthly_sales.loc[monthly_sales['년월'] == month_period, 'I열합계'] = i_sum
-                            else:
-                                # 해당 월 데이터가 없으면 추가
-                                new_row = pd.DataFrame({'년월': [month_period], '매출총이익': [amount], 'I열합계': [0]})
-                                monthly_sales = pd.concat([monthly_sales, new_row], ignore_index=True)
-                        
-                        # 정렬 다시 수행
-                        monthly_sales = monthly_sales.sort_values('년월')
-                    else:
-                        monthly_sales = pd.DataFrame(columns=['년월', '매출총이익'])
-                    
-                    # 전월 대비 성장률 계산
-                    monthly_sales['전월매출'] = monthly_sales['매출총이익'].shift(1)
-                    monthly_sales['성장률'] = ((monthly_sales['매출총이익'] - monthly_sales['전월매출']) / monthly_sales['전월매출'] * 100).round(2)
-                    monthly_sales['년월_표시'] = monthly_sales['년월'].astype(str)
-                    
-                    col_analysis1, col_analysis2, col_analysis3, col_analysis4 = st.columns(4)
-                    
-                    with col_analysis1:
-                        # 성장한 달
-                        growth_months = monthly_sales[monthly_sales['성장률'] > 0].copy()
-                        if len(growth_months) > 0:
-                            max_growth = growth_months.loc[growth_months['성장률'].idxmax()]
-                            st.metric(
-                                "📈 성장한 달",
-                                f"{max_growth['년월_표시']}",
-                                delta=f"{max_growth['성장률']:.1f}%",
-                                help=f"매출: {max_growth['매출총이익']:,.0f}원"
-                            )
-                        else:
-                            st.metric("📈 성장한 달", "없음")
-                    
-                    with col_analysis2:
-                        # 급감한 달
-                        decline_months = monthly_sales[monthly_sales['성장률'] < 0].copy()
-                        if len(decline_months) > 0:
-                            max_decline = decline_months.loc[decline_months['성장률'].idxmin()]
-                            st.metric(
-                                "📉 급감한 달",
-                                f"{max_decline['년월_표시']}",
-                                delta=f"{max_decline['성장률']:.1f}%",
-                                help=f"매출: {max_decline['매출총이익']:,.0f}원"
-                            )
-                        else:
-                            st.metric("📉 급감한 달", "없음")
-                    
-                    with col_analysis3:
-                        # 최고 매출 월
-                        max_sales_month = monthly_sales.loc[monthly_sales['매출총이익'].idxmax()]
-                        st.metric(
-                            "🎯 최고 매출 월",
-                            f"{max_sales_month['년월_표시']}",
-                            delta=f"{max_sales_month['매출총이익']:,.0f}원",
-                            help=f"전월 대비: {max_sales_month['성장률']:.1f}%"
-                        )
-                    
-                    with col_analysis4:
-                        # 부진 월 (평균 대비 낮은 월)
-                        avg_sales = monthly_sales['매출총이익'].mean()
-                        weak_months = monthly_sales[monthly_sales['매출총이익'] < avg_sales * 0.8].copy()
-                        if len(weak_months) > 0:
-                            weakest_month = weak_months.loc[weak_months['매출총이익'].idxmin()]
-                            st.metric(
-                                "⚠ 부진 월",
-                                f"{weakest_month['년월_표시']}",
-                                delta=f"{weakest_month['매출총이익']:,.0f}원",
-                                help=f"평균 대비: {((weakest_month['매출총이익'] / avg_sales - 1) * 100):.1f}%"
-                            )
-                        else:
-                            st.metric("⚠ 부진 월", "없음")
-                    
-                    # 월별 매출총이익 그래프
-                    st.markdown("---")
-                    st.markdown("#### 📊 월별 매출총이익 추이")
-                    
-                    # 바 차트와 라인 차트를 함께 표시
-                    col_chart1, col_chart2 = st.columns(2)
-                    
-                    with col_chart1:
-                        # 월별 매출총이익 바 차트
-                        fig_bar_main = px.bar(
-                            monthly_sales,
-                            x='년월_표시',
-                            y='매출총이익',
-                            title='월별 매출총이익 (바 차트)',
-                            labels={'매출총이익': '매출총이익 (원)', '년월_표시': '년월'},
-                            color='매출총이익',
-                            color_continuous_scale='Greens'
-                        )
-                        fig_bar_main.update_layout(
-                            xaxis_title="년월",
-                            yaxis_title="매출총이익 (원)",
-                            yaxis=dict(tickformat=','),
-                            showlegend=False
-                        )
-                        fig_bar_main.update_traces(
-                            hovertemplate='<b>%{x}</b><br>매출총이익: %{y:,.0f}원<extra></extra>'
-                        )
-                        st.plotly_chart(fig_bar_main, use_container_width=True, key="monthly_sales_bar_main")
-                    
-                    with col_chart2:
-                        # 월별 매출총이익 라인 차트
-                        fig_line_main = px.line(
-                            monthly_sales,
-                            x='년월_표시',
-                            y='매출총이익',
-                            title='월별 매출총이익 (라인 차트)',
-                            labels={'매출총이익': '매출총이익 (원)', '년월_표시': '년월'},
-                            markers=True
-                        )
-                        fig_line_main.update_layout(
-                            xaxis_title="년월",
-                            yaxis_title="매출총이익 (원)",
-                            yaxis=dict(tickformat=','),
-                            hovermode='x unified'
-                        )
-                        fig_line_main.update_traces(
-                            hovertemplate='<b>%{x}</b><br>매출총이익: %{y:,.0f}원<extra></extra>'
-                        )
-                        st.plotly_chart(fig_line_main, use_container_width=True, key="monthly_sales_line_main")
-                    
-                    # 월별 집계 테이블 (N열과 I열 합계 함께 표시)
-                    st.markdown("---")
-                    st.markdown("#### 📋 월별 집계 상세 (N열 기준, I열 합계 포함)")
-                    
-                    # 테이블 표시용 데이터 준비
-                    monthly_display = monthly_sales.copy()
-                    monthly_display['년월_표시'] = monthly_display['년월'].astype(str)
-                    
-                    # I열 합계가 있는 경우 컬럼명 변경
-                    if 'I열합계' in monthly_display.columns:
-                        monthly_display = monthly_display.rename(columns={
-                            '매출총이익': 'N열 합계 (매출총이익)',
-                            'I열합계': 'I열 합계'
-                        })
-                        display_columns = ['년월_표시', 'N열 합계 (매출총이익)', 'I열 합계']
-                    else:
-                        monthly_display = monthly_display.rename(columns={
-                            '매출총이익': 'N열 합계 (매출총이익)'
-                        })
-                        display_columns = ['년월_표시', 'N열 합계 (매출총이익)']
-                    
-                    # 천단위 구분 기호 적용
-                    for col in ['N열 합계 (매출총이익)', 'I열 합계']:
-                        if col in monthly_display.columns:
-                            monthly_display[col] = monthly_display[col].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
-                    
-                    st.dataframe(monthly_display[display_columns], use_container_width=True, height=400)
-                    
+            if total_cost is not None:
+                st.markdown(f"**매출원가:** {total_cost:,.0f}원")
+            else:
+                st.markdown("**매출원가:** 데이터 없음")
+        
+        with col_kpi2:
+            if total_profit is not None:
+                st.markdown(f"**매출총이익(GP):** {total_profit:,.0f}원")
+            else:
+                st.markdown("**매출총이익(GP):** 데이터 없음")
+            
+            if profit_rate is not None:
+                st.markdown(f"**이익률(GP%):** {profit_rate:.1f}%")
+            else:
+                st.markdown("**이익률(GP%):** 계산 불가")
         
         st.markdown("---")
         
-        # 데이터 분석 차트
-        st.subheader(f"📊 {month_display} 데이터 분석")
+        # 선택된 월 데이터 분석 차트
+        month_label = f"{selected_month}월" if selected_month is not None else "월"
+        st.subheader(f"📊 {month_label} 데이터 분석")
         
         # 주차 번호를 한국어로 변환하는 함수
-        def week_to_korean(week_num, min_week=None):
-            """주차 번호를 한국어로 변환 (예: 45 -> '{month_display} 첫째주')"""
+        def week_to_korean(week_num, min_week=None, month=None):
+            """주차 번호를 한국어로 변환 (예: 45 -> '11월 첫째주' 또는 '12월 첫째주')"""
             week_korean = ['첫째', '둘째', '셋째', '넷째', '다섯째']
+            month_label = f"{month}월" if month is not None else "월"
             if min_week is not None:
                 # 최소 주차를 기준으로 상대적 주차 계산
                 relative_week = week_num - min_week
                 if 0 <= relative_week < len(week_korean):
-                    return f"{month_display} {week_korean[relative_week]}주"
-            return f"{month_display} {week_num}주"
+                    return f"{month_label} {week_korean[relative_week]}주"
+            return f"{month_label} {week_num}주"
         
         # 주간별 또는 일별 트렌드 (날짜 컬럼이 있는 경우)
         if '년월' in df.columns or len(date_columns) > 0:
@@ -871,113 +692,540 @@ if uploaded_file is not None:
                 min_week = df['주차'].min() if len(df) > 0 else None
                 
                 # 주차를 한국어로 변환
-                df['주차_한글'] = df['주차'].apply(lambda x: week_to_korean(x, min_week))
+                df['주차_한글'] = df['주차'].apply(lambda x: week_to_korean(x, min_week, selected_month))
                 
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    # 주차별 데이터 (한국어 주차명 사용)
-                    # 주차 번호와 한글명을 함께 유지하여 정렬
+                    # 주차별 총 판매수량과 매출이익금 통합 그래프
                     weekly_data = df.groupby(['주차', '주차_한글']).size().reset_index(name='건수')
-                    weekly_data = weekly_data.sort_values('주차')  # 주차 번호로 정렬
-                    fig_weekly = px.bar(
-                        weekly_data,
-                        x='주차_한글',
-                        y='건수',
-                        title=f'{month_display} 주차별 데이터 건수',
-                        labels={'주차_한글': '주차', '건수': '건수'},
-                        color='건수',
-                        color_continuous_scale='Blues',
-                        category_orders={'주차_한글': weekly_data['주차_한글'].tolist()}  # 정렬 순서 유지
-                    )
-                    fig_weekly.update_layout(
-                        xaxis_title="주차",
-                        yaxis_title="건수"
-                    )
-                    # 툴팁에서 컬러 정보 숨기기
-                    fig_weekly.update_traces(
-                        hovertemplate='<b>%{x}</b><br>건수: %{y}<extra></extra>'
-                    )
+                    weekly_data = weekly_data.sort_values('주차')
+                    
+                    # 매출이익금이 있으면 함께 표시
+                    if amount_col and amount_col in df.columns:
+                        if df[amount_col].dtype == 'object':
+                            df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce')
+                        weekly_profit = df.groupby(['주차', '주차_한글'])[amount_col].sum().reset_index()
+                        weekly_profit.columns = ['주차', '주차_한글', '매출이익금']
+                        weekly_profit = weekly_profit.sort_values('주차')
+                        weekly_combined = weekly_data.merge(weekly_profit, on=['주차', '주차_한글'], how='left')
+                        
+                        # 이중 Y축 그래프 생성
+                        from plotly.subplots import make_subplots
+                        fig_weekly = make_subplots(specs=[[{"secondary_y": True}]])
+                        
+                        # 파스텔 톤 colorscale 정의
+                        pastel_blue = [[0, '#E8F4F8'], [0.5, '#B8E6F5'], [1, '#87CEEB']]
+                        pastel_green = [[0, '#E8F5E9'], [0.5, '#C8E6C9'], [1, '#A5D6A7']]
+                        
+                        # 총 판매수량 바 차트 (왼쪽 Y축) - 파스텔 톤 적용
+                        fig_weekly.add_trace(
+                            go.Bar(
+                                x=weekly_combined['주차_한글'],
+                                y=weekly_combined['건수'],
+                                name='총 판매수량',
+                                marker=dict(
+                                    color=weekly_combined['건수'],
+                                    colorscale=pastel_blue,
+                                    showscale=True,
+                                    colorbar=dict(
+                                        title=dict(text="총 판매수량", side="right"),
+                                        x=1.25,
+                                        len=0.35,
+                                        y=0.7,
+                                        yanchor='middle',
+                                        thickness=15
+                                    )
+                                ),
+                                hovertemplate='<b>%{x}</b><br>총 판매수량: %{y}<extra></extra>'
+                            ),
+                            secondary_y=False,
+                        )
+                        
+                        # 매출이익금 라인 차트 (오른쪽 Y축) - 파스텔 톤 적용
+                        fig_weekly.add_trace(
+                            go.Scatter(
+                                x=weekly_combined['주차_한글'],
+                                y=weekly_combined['매출이익금'],
+                                name='매출이익금',
+                                mode='lines+markers',
+                                line=dict(color='#A5D6A7', width=3),
+                                marker=dict(
+                                    size=8,
+                                    color=weekly_combined['매출이익금'],
+                                    colorscale=pastel_green,
+                                    showscale=True,
+                                    colorbar=dict(
+                                        title=dict(text="매출이익금", side="right"),
+                                        x=1.25,
+                                        len=0.35,
+                                        y=0.25,
+                                        yanchor='middle',
+                                        thickness=15
+                                    )
+                                ),
+                                hovertemplate='<b>%{x}</b><br>매출이익금: %{y:,.0f}원<extra></extra>'
+                            ),
+                            secondary_y=True,
+                        )
+                        
+                        fig_weekly.update_xaxes(
+                            title_text="주차",
+                            title_font=dict(size=16, color='black', family='Arial Black'),
+                            categoryorder='array',
+                            categoryarray=weekly_combined['주차_한글'].tolist(),
+                            showgrid=False  # 세로 보조 눈금선 숨김
+                        )
+                        fig_weekly.update_yaxes(
+                            title_text="총 판매수량",
+                            secondary_y=False,
+                            showgrid=True
+                        )
+                        fig_weekly.update_yaxes(
+                            title_text="매출이익금 (원)",
+                            secondary_y=True,
+                            tickformat=',',
+                            showgrid=False  # 오른쪽 Y축 그리드선 비활성화
+                        )
+                        month_label = f"{selected_month}월" if selected_month is not None else "월"
+                        fig_weekly.update_layout(
+                            title=f'{month_label} 주차별 총 판매수량 및 매출이익금',
+                            hovermode='x unified',
+                            showlegend=True,
+                            legend=dict(
+                                x=0.02,
+                                y=0.98,
+                                xanchor='left',
+                                yanchor='top',
+                                bgcolor='rgba(255,255,255,0.8)',
+                                bordercolor='rgba(0,0,0,0.2)',
+                                borderwidth=1
+                            ),
+                            margin=dict(r=250)  # 오른쪽 마진 대폭 증가 (컬러바 공간 확보)
+                        )
+                    else:
+                        # 매출이익금이 없으면 총 판매수량만 표시
+                        month_label = f"{selected_month}월" if selected_month is not None else "월"
+                        fig_weekly = px.bar(
+                            weekly_data,
+                            x='주차_한글',
+                            y='건수',
+                            title=f'{month_label} 주차별 총 판매수량',
+                            labels={'주차_한글': '주차', '건수': '총 판매수량'},
+                            color='건수',
+                            color_continuous_scale='Blues',
+                            category_orders={'주차_한글': weekly_data['주차_한글'].tolist()}
+                        )
+                        fig_weekly.update_layout(
+                            xaxis_title="주차",
+                            yaxis_title="총 판매수량"
+                        )
+                        fig_weekly.update_traces(
+                            hovertemplate='<b>%{x}</b><br>총 판매수량: %{y}<extra></extra>'
+                        )
+                    
                     st.plotly_chart(fig_weekly, use_container_width=True)
                 
                 with col2:
-                    # 일별 데이터
+                    # 일별 총 판매수량과 매출이익금 통합 그래프
                     daily_data = df.groupby('일').size().reset_index(name='건수')
-                    fig_daily = px.line(
-                        daily_data,
-                        x='일',
-                        y='건수',
-                        title=f'{month_display} 일별 데이터 추이',
-                        markers=True
-                    )
-                    fig_daily.update_layout(
-                        xaxis_title="일",
-                        yaxis_title="건수",
-                        hovermode='x unified'
-                    )
-                    st.plotly_chart(fig_daily, use_container_width=True)
-                
-                # 매출총이익 그래프 추가 (주차별/일별)
-                if amount_col and amount_col in df.columns:
-                    st.markdown("---")
-                    st.markdown("#### 💰 매출이익금 분석")
                     
-                    # 매출총이익이 숫자형이 아니면 변환
-                    if df[amount_col].dtype == 'object':
-                        df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce')
-                    
-                    col_profit_weekly, col_profit_daily = st.columns(2)
-                    
-                    with col_profit_weekly:
-                        # 주차별 매출이익금 (한국어 주차명 사용)
-                        weekly_profit = df.groupby(['주차', '주차_한글'])[amount_col].sum().reset_index()
-                        weekly_profit.columns = ['주차', '주차_한글', '매출이익금']
-                        weekly_profit = weekly_profit.sort_values('주차')  # 주차 번호로 정렬
-                        fig_weekly_profit = px.bar(
-                            weekly_profit,
-                            x='주차_한글',
-                            y='매출이익금',
-                            title=f'{month_display} 주차별 매출이익금',
-                            labels={'주차_한글': '주차', '매출이익금': '매출이익금 (원)'},
-                            color='매출이익금',
-                            color_continuous_scale='Greens',
-                            category_orders={'주차_한글': weekly_profit['주차_한글'].tolist()}  # 정렬 순서 유지
-                        )
-                        fig_weekly_profit.update_layout(
-                            xaxis_title="주차",
-                            yaxis_title="매출이익금 (원)",
-                            yaxis=dict(tickformat=',')
-                        )
-                        # 툴팁에서 컬러 정보 숨기기
-                        fig_weekly_profit.update_traces(
-                            hovertemplate='<b>%{x}</b><br>매출이익금: %{y:,.0f}원<extra></extra>'
-                        )
-                        st.plotly_chart(fig_weekly_profit, use_container_width=True)
-                    
-                    with col_profit_daily:
-                        # 일별 매출이익금
+                    # 매출이익금이 있으면 함께 표시
+                    if amount_col and amount_col in df.columns:
+                        if df[amount_col].dtype == 'object':
+                            df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce')
                         daily_profit = df.groupby('일')[amount_col].sum().reset_index()
                         daily_profit.columns = ['일', '매출이익금']
-                        fig_daily_profit = px.line(
-                            daily_profit,
+                        daily_combined = daily_data.merge(daily_profit, on='일', how='left')
+                        
+                        # 이중 Y축 그래프 생성
+                        from plotly.subplots import make_subplots
+                        fig_daily = make_subplots(specs=[[{"secondary_y": True}]])
+                        
+                        # 파스텔 톤 colorscale 정의
+                        pastel_blue = [[0, '#E8F4F8'], [0.5, '#B8E6F5'], [1, '#87CEEB']]
+                        pastel_green = [[0, '#E8F5E9'], [0.5, '#C8E6C9'], [1, '#A5D6A7']]
+                        
+                        # 총 판매수량 라인 차트 (왼쪽 Y축) - 파스텔 톤 적용
+                        fig_daily.add_trace(
+                            go.Scatter(
+                                x=daily_combined['일'],
+                                y=daily_combined['건수'],
+                                name='총 판매수량',
+                                mode='lines+markers',
+                                line=dict(color='#87CEEB', width=2),
+                                marker=dict(
+                                    size=6,
+                                    color=daily_combined['건수'],
+                                    colorscale=pastel_blue,
+                                    showscale=True,
+                                    colorbar=dict(
+                                        title=dict(text="총 판매수량", side="right"),
+                                        x=1.25,
+                                        len=0.35,
+                                        y=0.7,
+                                        yanchor='middle',
+                                        thickness=15
+                                    )
+                                ),
+                                hovertemplate='<b>일: %{x}</b><br>총 판매수량: %{y}<extra></extra>'
+                            ),
+                            secondary_y=False,
+                        )
+                        
+                        # 매출이익금 라인 차트 (오른쪽 Y축) - 파스텔 톤 적용
+                        fig_daily.add_trace(
+                            go.Scatter(
+                                x=daily_combined['일'],
+                                y=daily_combined['매출이익금'],
+                                name='매출이익금',
+                                mode='lines+markers',
+                                line=dict(color='#A5D6A7', width=2),
+                                marker=dict(
+                                    size=6,
+                                    color=daily_combined['매출이익금'],
+                                    colorscale=pastel_green,
+                                    showscale=True,
+                                    colorbar=dict(
+                                        title=dict(text="매출이익금", side="right"),
+                                        x=1.25,
+                                        len=0.35,
+                                        y=0.25,
+                                        yanchor='middle',
+                                        thickness=15
+                                    )
+                                ),
+                                hovertemplate='<b>일: %{x}</b><br>매출이익금: %{y:,.0f}원<extra></extra>'
+                            ),
+                            secondary_y=True,
+                        )
+                        
+                        fig_daily.update_xaxes(
+                            title_text="일",
+                            title_font=dict(size=16, color='black', family='Arial Black'),
+                            showgrid=False  # 세로 보조 눈금선 숨김
+                        )
+                        fig_daily.update_yaxes(
+                            title_text="총 판매수량",
+                            secondary_y=False,
+                            showgrid=True
+                        )
+                        fig_daily.update_yaxes(
+                            title_text="매출이익금 (원)",
+                            secondary_y=True,
+                            tickformat=',',
+                            showgrid=False  # 오른쪽 Y축 그리드선 비활성화
+                        )
+                        month_label = f"{selected_month}월" if selected_month is not None else "월"
+                        fig_daily.update_layout(
+                            title=f'{month_label} 일별 총 판매수량 및 매출이익금 추이',
+                            hovermode='x unified',
+                            showlegend=True,
+                            legend=dict(
+                                x=0.02,
+                                y=0.98,
+                                xanchor='left',
+                                yanchor='top',
+                                bgcolor='rgba(255,255,255,0.8)',
+                                bordercolor='rgba(0,0,0,0.2)',
+                                borderwidth=1
+                            ),
+                            margin=dict(r=250)  # 오른쪽 마진 대폭 증가 (컬러바 공간 확보)
+                        )
+                    else:
+                        # 매출이익금이 없으면 총 판매수량만 표시
+                        month_label = f"{selected_month}월" if selected_month is not None else "월"
+                        fig_daily = px.line(
+                            daily_data,
                             x='일',
-                            y='매출이익금',
-                            title=f'{month_display} 일별 매출이익금 추이',
+                            y='건수',
+                            title=f'{month_label} 일별 총 판매수량 추이',
                             markers=True
                         )
-                        fig_daily_profit.update_layout(
+                        fig_daily.update_layout(
                             xaxis_title="일",
-                            yaxis_title="매출이익금 (원)",
-                            hovermode='x unified',
-                            yaxis=dict(tickformat=',')
+                            yaxis_title="총 판매수량",
+                            hovermode='x unified'
                         )
-                        st.plotly_chart(fig_daily_profit, use_container_width=True)
+                    
+                    st.plotly_chart(fig_daily, use_container_width=True)
         else:
-            # 날짜 정보가 없으면 전체 데이터 건수 표시
+            # 날짜 정보가 없으면 전체 총 판매수량 표시
             st.info("날짜 정보가 없어 트렌드 분석을 할 수 없습니다.")
         
+        # 플랫폼별 성과 분석
+        st.subheader("📊 플랫폼별 성과")
+        
+        # A열 찾기 (플랫폼, 1번째 컬럼, 인덱스 0)
+        platform_col = None
+        if len(df.columns) > 0:
+            platform_col = df.columns[0]  # A열 (1번째 컬럼)
+        
+        # I열 찾기 (판매 수량, 9번째 컬럼, 인덱스 8)
+        i_column_index = 8  # I열은 9번째 (0-based index: 8)
+        sales_qty_col = None
+        if len(df.columns) > i_column_index:
+            sales_qty_col = df.columns[i_column_index]
+        
+        # O열 찾기 (이익률, 15번째 컬럼, 인덱스 14)
+        o_column_index = 14  # O열은 15번째 (0-based index: 14)
+        profit_rate_col = None
+        if len(df.columns) > o_column_index:
+            profit_rate_col = df.columns[o_column_index]
+        
+        if platform_col is not None and revenue_col is not None:
+            # 플랫폼별 집계
+            platform_summary = df.groupby(platform_col).agg({
+                revenue_col: 'sum',  # 매출 (J열)
+            }).reset_index()
+            platform_summary.columns = ['플랫폼', '매출']
+            
+            # I열 합계 추가 (최다 판매 판단용)
+            if sales_qty_col is not None:
+                if df[sales_qty_col].dtype == 'object':
+                    df[sales_qty_col] = pd.to_numeric(df[sales_qty_col], errors='coerce')
+                sales_qty_sum = df.groupby(platform_col)[sales_qty_col].sum().reset_index()
+                sales_qty_sum.columns = ['플랫폼', '판매수량']
+                # merge 전에 판매수량을 숫자형으로 확실히 변환
+                sales_qty_sum['판매수량'] = pd.to_numeric(sales_qty_sum['판매수량'], errors='coerce').fillna(0).astype(int)
+                platform_summary = platform_summary.merge(sales_qty_sum, on='플랫폼', how='left')
+                # merge 후에도 다시 한 번 숫자형으로 변환 (안전장치)
+                platform_summary['판매수량'] = pd.to_numeric(platform_summary['판매수량'], errors='coerce').fillna(0).astype(int)
+            
+            # O열 이익률 추가
+            if profit_rate_col is not None:
+                if df[profit_rate_col].dtype == 'object':
+                    df[profit_rate_col] = pd.to_numeric(df[profit_rate_col], errors='coerce')
+                # 플랫폼별 평균 이익률 계산
+                profit_rate_avg = df.groupby(platform_col)[profit_rate_col].mean().reset_index()
+                profit_rate_avg.columns = ['플랫폼', '이익률']
+                platform_summary = platform_summary.merge(profit_rate_avg, on='플랫폼', how='left')
+            else:
+                # O열이 없으면 매출과 매출원가로 이익률 계산
+                if cost_col is not None:
+                    platform_cost = df.groupby(platform_col)[cost_col].sum().reset_index()
+                    platform_cost.columns = ['플랫폼', '매출원가']
+                    platform_summary = platform_summary.merge(platform_cost, on='플랫폼', how='left')
+                    platform_summary['이익률'] = ((platform_summary['매출'] - platform_summary['매출원가']) / platform_summary['매출'] * 100).round(2)
+                    platform_summary = platform_summary.drop('매출원가', axis=1)
+            
+            # 비고 컬럼 초기화
+            platform_summary['비고'] = ''
+            
+            # 최다 판매 플랫폼 찾기 (I열 합계가 가장 높은 플랫폼)
+            if sales_qty_col is not None and '판매수량' in platform_summary.columns:
+                max_sales_platform = platform_summary.loc[platform_summary['판매수량'].idxmax(), '플랫폼']
+                platform_summary.loc[platform_summary['플랫폼'] == max_sales_platform, '비고'] += '최다 판매 / '
+            
+            # 수수료 높은 플랫폼 찾기 (매출 대비 비용 비율이 높은 플랫폼)
+            if cost_col is not None:
+                platform_cost = df.groupby(platform_col)[cost_col].sum().reset_index()
+                platform_cost.columns = ['플랫폼', '매출원가']
+                platform_summary_with_cost = platform_summary.merge(platform_cost, on='플랫폼', how='left')
+                platform_summary_with_cost['수수료율'] = (platform_summary_with_cost['매출원가'] / platform_summary_with_cost['매출'] * 100).round(2)
+                max_fee_platform = platform_summary_with_cost.loc[platform_summary_with_cost['수수료율'].idxmax(), '플랫폼']
+                platform_summary.loc[platform_summary['플랫폼'] == max_fee_platform, '비고'] += '수수료 높음 / '
+            
+            # 이익률 우수 플랫폼 찾기 (O열 이익률이 가장 높은 플랫폼)
+            if '이익률' in platform_summary.columns:
+                max_profit_rate_platform = platform_summary.loc[platform_summary['이익률'].idxmax(), '플랫폼']
+                platform_summary.loc[platform_summary['플랫폼'] == max_profit_rate_platform, '비고'] += '이익률 우수'
+            
+            # 비고 컬럼의 끝 '/' 제거
+            platform_summary['비고'] = platform_summary['비고'].str.rstrip(' / ')
+            
+            # 표시용 데이터 준비
+            platform_display = platform_summary.copy()
+            platform_display['매출'] = platform_display['매출'].apply(lambda x: f"{x:,.0f}원" if pd.notna(x) else "0원")
+            if '판매수량' in platform_display.columns:
+                platform_display['판매수량'] = platform_display['판매수량'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
+            if '이익률' in platform_display.columns:
+                def format_profit_rate(x):
+                    if pd.notna(x) and x != 0:
+                        # 값이 1 미만이면 100을 곱해서 백분율로 변환
+                        if abs(float(x)) < 1:
+                            return f"{float(x) * 100:.1f}%"
+                        else:
+                            return f"{float(x):.1f}%"
+                    else:
+                        return "0%"
+                platform_display['이익률'] = platform_display['이익률'].apply(format_profit_rate)
+            
+            # 표시 컬럼 선택
+            display_cols = ['플랫폼', '매출']
+            if '이익률' in platform_display.columns:
+                display_cols.append('이익률')
+            if '판매수량' in platform_display.columns:
+                display_cols.append('판매수량')
+            display_cols.append('비고')
+            
+            # 정렬 전에 숫자형 컬럼을 명시적으로 숫자형으로 변환 (안전장치)
+            # 모든 숫자 컬럼에 대해 동일한 방식으로 처리
+            if '판매수량' in platform_summary.columns:
+                # 판매수량도 매출/이익률과 동일한 방식으로 처리
+                if platform_summary['판매수량'].dtype == 'object' or str(platform_summary['판매수량'].dtype).startswith('string'):
+                    # 문자열인 경우 숫자로 변환 (콤마, 공백 제거)
+                    platform_summary['판매수량'] = platform_summary['판매수량'].astype(str).str.replace(',', '').str.replace(' ', '').str.replace('원', '')
+                platform_summary['판매수량'] = pd.to_numeric(platform_summary['판매수량'], errors='coerce').fillna(0)
+            
+            if '이익률' in platform_summary.columns:
+                # 이익률도 문자열일 수 있으므로 처리
+                if platform_summary['이익률'].dtype == 'object' or str(platform_summary['이익률'].dtype).startswith('string'):
+                    # 문자열인 경우 숫자로 변환 (% 제거)
+                    platform_summary['이익률'] = platform_summary['이익률'].astype(str).str.replace('%', '').str.replace(',', '').str.replace(' ', '')
+                platform_summary['이익률'] = pd.to_numeric(platform_summary['이익률'], errors='coerce').fillna(0)
+            
+            if '매출' in platform_summary.columns:
+                # 매출도 문자열일 수 있으므로 처리
+                if platform_summary['매출'].dtype == 'object' or str(platform_summary['매출'].dtype).startswith('string'):
+                    # 문자열인 경우 숫자로 변환 (원, 콤마, 공백 제거)
+                    platform_summary['매출'] = platform_summary['매출'].astype(str).str.replace('원', '').str.replace(',', '').str.replace(' ', '')
+                platform_summary['매출'] = pd.to_numeric(platform_summary['매출'], errors='coerce').fillna(0)
+            
+            # 정렬 옵션
+            sort_option = st.selectbox("정렬 기준", ['매출 높은 순', '이익률 높은 순', '판매수량 높은 순'], key='platform_sort')
+            
+            # 모든 정렬 옵션에 대해 동일한 방식으로 처리 (nlargest 사용)
+            platform_summary_sorted = platform_summary.copy()
+            
+            if sort_option == '매출 높은 순':
+                # 매출을 숫자형으로 확실히 변환
+                platform_summary_sorted['매출'] = pd.to_numeric(platform_summary_sorted['매출'], errors='coerce').fillna(0)
+                # nlargest를 사용하여 숫자 기준 정렬 보장
+                platform_summary_sorted = platform_summary_sorted.nlargest(len(platform_summary_sorted), '매출').reset_index(drop=True)
+            elif sort_option == '이익률 높은 순' and '이익률' in platform_summary_sorted.columns:
+                # 이익률을 숫자형으로 확실히 변환
+                platform_summary_sorted['이익률'] = pd.to_numeric(platform_summary_sorted['이익률'], errors='coerce').fillna(0)
+                # nlargest를 사용하여 숫자 기준 정렬 보장
+                platform_summary_sorted = platform_summary_sorted.nlargest(len(platform_summary_sorted), '이익률').reset_index(drop=True)
+            elif sort_option == '판매수량 높은 순' and '판매수량' in platform_summary_sorted.columns:
+                # 판매수량을 숫자형으로 확실히 변환 (매출/이익률과 동일한 방식)
+                # 문자열인 경우 숫자로 변환
+                if platform_summary_sorted['판매수량'].dtype == 'object' or str(platform_summary_sorted['판매수량'].dtype).startswith('string'):
+                    platform_summary_sorted['판매수량'] = platform_summary_sorted['판매수량'].astype(str).str.replace(',', '').str.replace(' ', '').str.replace('원', '')
+                
+                # 판매수량을 숫자형으로 변환
+                platform_summary_sorted['판매수량'] = pd.to_numeric(platform_summary_sorted['판매수량'], errors='coerce').fillna(0)
+                
+                # 정렬 전 판매수량 값 확인 및 디버깅
+                # 판매수량 기준으로 직접 정렬 (nlargest 대신 sort_values 사용하여 더 확실하게)
+                platform_summary_sorted = platform_summary_sorted.sort_values('판매수량', ascending=False, na_position='last', kind='mergesort').reset_index(drop=True)
+                
+                # 정렬 후 판매수량이 숫자형인지 확인
+                platform_summary_sorted['판매수량'] = pd.to_numeric(platform_summary_sorted['판매수량'], errors='coerce').fillna(0)
+                
+                # 정렬 순서 검증: 내림차순이어야 함
+                sales_qty_values = platform_summary_sorted['판매수량'].values
+                if len(sales_qty_values) > 1:
+                    is_descending = all(sales_qty_values[i] >= sales_qty_values[i+1] for i in range(len(sales_qty_values)-1))
+                    if not is_descending:
+                        # 정렬이 제대로 안 되었다면 다시 정렬 (nlargest 사용)
+                        platform_summary_sorted = platform_summary_sorted.nlargest(len(platform_summary_sorted), '판매수량').reset_index(drop=True)
+                        platform_summary_sorted['판매수량'] = pd.to_numeric(platform_summary_sorted['판매수량'], errors='coerce').fillna(0)
+            else:
+                platform_summary_sorted = platform_summary_sorted.reset_index(drop=True)
+            
+            # 정렬된 데이터 표시 (순서 유지하면서 문자열로 변환)
+            # 정렬된 순서를 명시적으로 유지하기 위해 인덱스를 리셋한 복사본 사용
+            platform_display_sorted = platform_summary_sorted.copy()
+            platform_display_sorted = platform_display_sorted.reset_index(drop=True)
+            
+            # 정렬된 순서를 보존하기 위해 인덱스 순서대로 문자열 변환
+            # 매출을 문자열로 변환 (순서는 이미 정렬됨)
+            매출_formatted = []
+            for idx in platform_display_sorted.index:
+                val = platform_display_sorted.loc[idx, '매출']
+                if pd.notna(val) and val != 0:
+                    매출_formatted.append(f"{float(val):,.0f}원")
+                else:
+                    매출_formatted.append("0원")
+            platform_display_sorted['매출'] = 매출_formatted
+            
+            # 판매수량을 문자열로 변환 (숫자형에서 직접 변환하여 순서 유지)
+            if '판매수량' in platform_display_sorted.columns:
+                # 판매수량이 숫자형인지 확인하고, 아니면 숫자형으로 변환
+                if platform_display_sorted['판매수량'].dtype == 'object' or str(platform_display_sorted['판매수량'].dtype).startswith('string'):
+                    platform_display_sorted['판매수량'] = pd.to_numeric(platform_display_sorted['판매수량'], errors='coerce').fillna(0)
+                
+                # 판매수량 정렬인 경우 정렬 순서를 명시적으로 보존
+                if sort_option == '판매수량 높은 순':
+                    # 판매수량 값들을 숫자형으로 변환하여 정렬 순서 확인
+                    sales_qty_numeric = pd.to_numeric(platform_display_sorted['판매수량'], errors='coerce').fillna(0).values
+                    # 내림차순인지 확인
+                    if len(sales_qty_numeric) > 1:
+                        is_descending = all(sales_qty_numeric[i] >= sales_qty_numeric[i+1] for i in range(len(sales_qty_numeric)-1))
+                        if not is_descending:
+                            # 정렬이 제대로 안 되었다면 다시 정렬
+                            platform_display_sorted = platform_display_sorted.sort_values('판매수량', ascending=False, na_position='last', kind='mergesort').reset_index(drop=True)
+                            platform_display_sorted['판매수량'] = pd.to_numeric(platform_display_sorted['판매수량'], errors='coerce').fillna(0)
+                
+                # 정렬된 순서를 완전히 보존하기 위해 iloc로 순서대로 변환
+                sales_qty_formatted = []
+                # 판매수량 값을 먼저 숫자형으로 확실히 변환
+                platform_display_sorted['판매수량'] = pd.to_numeric(platform_display_sorted['판매수량'], errors='coerce').fillna(0)
+                # 정렬된 순서대로 문자열로 변환
+                for i in range(len(platform_display_sorted)):
+                    val = platform_display_sorted.iloc[i]['판매수량']
+                    # 숫자형인지 확인하고 변환
+                    if pd.notna(val) and pd.notnull(val):
+                        try:
+                            num_val = float(val)
+                            if num_val != 0:
+                                sales_qty_formatted.append(f"{int(num_val):,}")
+                            else:
+                                sales_qty_formatted.append("0")
+                        except (ValueError, TypeError):
+                            sales_qty_formatted.append("0")
+                    else:
+                        sales_qty_formatted.append("0")
+                # 판매수량 컬럼을 문자열 리스트로 교체 (순서 보존)
+                platform_display_sorted['판매수량'] = sales_qty_formatted
+            
+            # 이익률을 문자열로 변환 (소수점 한 자리로 표시, 예: 79.8%)
+            if '이익률' in platform_display_sorted.columns:
+                이익률_formatted = []
+                for idx in platform_display_sorted.index:
+                    val = platform_display_sorted.loc[idx, '이익률']
+                    if pd.notna(val) and val != 0:
+                        # 값이 1 미만이면 100을 곱해서 백분율로 변환 (0.798 -> 79.8%)
+                        # 값이 1 이상이면 그대로 사용 (79.8 -> 79.8%)
+                        if abs(float(val)) < 1:
+                            val_display = float(val) * 100
+                        else:
+                            val_display = float(val)
+                        이익률_formatted.append(f"{val_display:.1f}%")
+                    else:
+                        이익률_formatted.append("0%")
+                platform_display_sorted['이익률'] = 이익률_formatted
+            
+            # 테이블 표시 (정렬된 순서 그대로 표시)
+            # 정렬된 순서를 명시적으로 보존하기 위해 인덱스를 재설정
+            display_data = platform_display_sorted[display_cols].copy()
+            display_data = display_data.reset_index(drop=True)
+            
+            # 판매수량 정렬인 경우 정렬 순서를 명시적으로 보존
+            if sort_option == '판매수량 높은 순' and '판매수량' in display_data.columns:
+                # 정렬 순서를 보존하기 위해 순서 번호 컬럼 추가
+                display_data['_display_order'] = range(len(display_data))
+                # 순서 번호로 정렬하여 정렬 순서 보장 (이미 정렬되어 있지만 확실히 하기 위해)
+                display_data = display_data.sort_values('_display_order', ascending=True).reset_index(drop=True)
+                # 순서 번호 컬럼 제거
+                display_data = display_data.drop('_display_order', axis=1)
+            
+            # 인덱스를 0부터 시작하도록 설정 (정렬 순서 보존)
+            display_data.index = range(len(display_data))
+            
+            # Streamlit dataframe 표시 (정렬된 순서 유지)
+            # 판매수량 정렬인 경우 정렬 순서를 명시적으로 보존하기 위해 순서 번호를 인덱스로 사용
+            st.dataframe(display_data, use_container_width=True, height=400, hide_index=True)
+        else:
+            st.warning("⚠️ 플랫폼 컬럼(A열) 또는 매출 컬럼(J열)을 찾을 수 없습니다.")
+        
+        st.markdown("---")
+        
         # 플랫폼별 비교
-        st.subheader(f"📋 플랫폼별 분석 ({month_display})")
+        month_label = f"{selected_month}월" if selected_month is not None else "월"
+        st.subheader(f"📋 플랫폼별 분석 ({month_label})")
         
         # 텍스트/카테고리 컬럼 찾기
         category_columns = df.select_dtypes(include=['object']).columns.tolist()
@@ -987,6 +1235,9 @@ if uploaded_file is not None:
         
         if len(category_columns) > 0:
             category_col = st.selectbox("분류 기준 선택", category_columns, key='category_select')
+            
+            # 총 판매수량 분석 섹션 제목 추가
+            st.markdown("#### 📊 플랫폼별 총 판매수량 분석")
             
             col1, col2 = st.columns(2)
             
@@ -998,14 +1249,14 @@ if uploaded_file is not None:
                     y=category_data.index,
                     orientation='h',
                     title=f'{category_col}별 분포 (상위 10개)',
-                    labels={'x': '건수', 'y': category_col},
+                    labels={'x': '총 판매수량', 'y': category_col},
                     color=category_data.values,
                     color_continuous_scale='Viridis'
                 )
                 fig_bar.update_layout(showlegend=False)
                 # 툴팁에서 컬러 정보 숨기기
                 fig_bar.update_traces(
-                    hovertemplate=f'<b>%{{y}}</b><br>건수: %{{x}}<extra></extra>'
+                    hovertemplate=f'<b>%{{y}}</b><br>총 판매수량: %{{x}}<extra></extra>'
                 )
                 st.plotly_chart(fig_bar, use_container_width=True)
             
@@ -1086,102 +1337,169 @@ if uploaded_file is not None:
                     )
                     st.plotly_chart(fig_profit_pie, use_container_width=True)
             
-            # 플랫폼별 상세 통계 테이블
-            st.markdown("#### 📊 플랫폼별 상세 통계")
-            
-            # 수량 컬럼 찾기
-            quantity_cols = [col for col in df.columns if any(keyword in str(col).lower() for keyword in ['수량', 'quantity', 'qty'])]
-            quantity_col = quantity_cols[0] if len(quantity_cols) > 0 else None
-            
-            # 매출기준액 컬럼 찾기
-            sales_base_cols = [col for col in df.columns if any(keyword in str(col).lower() for keyword in ['매출기준액', '매출기준', 'sales base', '기준액'])]
-            sales_base_col = sales_base_cols[0] if len(sales_base_cols) > 0 else None
-            
-            # 집계할 컬럼 준비
-            agg_dict = {}
-            
-            # 수량 컬럼이 있으면 합계 계산
-            if quantity_col and quantity_col in df.columns:
-                if df[quantity_col].dtype == 'object':
-                    df[quantity_col] = pd.to_numeric(df[quantity_col], errors='coerce')
-                agg_dict['수량'] = (quantity_col, 'sum')
-            
-            # 매출기준액 컬럼이 있으면 합계 계산
-            if sales_base_col and sales_base_col in df.columns:
-                if df[sales_base_col].dtype == 'object':
-                    df[sales_base_col] = pd.to_numeric(df[sales_base_col], errors='coerce')
-                agg_dict['매출기준액'] = (sales_base_col, 'sum')
-            
-            # 매출총이익 컬럼이 있으면 합계 계산
-            if amount_col and amount_col in df.columns:
-                if df[amount_col].dtype == 'object':
-                    df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce')
-                agg_dict['매출총이익'] = (amount_col, 'sum')
-            
-            # 플랫폼별 집계
-            if len(agg_dict) > 0:
-                # pandas groupby agg 형식으로 변환
-                groupby_dict = {v[0]: v[1] for v in agg_dict.values()}
-                rename_dict = {v[0]: k for k, v in agg_dict.items()}
-                
-                category_stats = df.groupby(category_col).agg(groupby_dict).rename(columns=rename_dict)
-                
-                # 매출총이익 높은 순으로 정렬
-                if '매출총이익' in category_stats.columns:
-                    category_stats = category_stats.sort_values('매출총이익', ascending=False)
-                else:
-                    # 매출총이익이 없으면 첫 번째 컬럼으로 정렬
-                    category_stats = category_stats.sort_values(category_stats.columns[0], ascending=False)
-                
-                # 천단위 구분 기호(콤마) 적용
-                category_stats_formatted = category_stats.copy()
-                for col in category_stats_formatted.columns:
-                    if category_stats_formatted[col].dtype in ['int64', 'float64', 'int32', 'float32']:
-                        category_stats_formatted[col] = category_stats_formatted[col].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
-                
-                # 플랫폼 컬럼을 인덱스에서 컬럼으로 변환
-                category_stats_formatted = category_stats_formatted.reset_index()
-                category_stats_formatted.columns.name = None
-                
-                # 컬럼 순서 정렬: 플랫폼, 수량, 매출기준액, 매출총이익
-                column_order = [category_col]
-                if '수량' in category_stats_formatted.columns:
-                    column_order.append('수량')
-                if '매출기준액' in category_stats_formatted.columns:
-                    column_order.append('매출기준액')
-                if '매출총이익' in category_stats_formatted.columns:
-                    column_order.append('매출총이익')
-                
-                # 나머지 컬럼도 추가
-                for col in category_stats_formatted.columns:
-                    if col not in column_order:
-                        column_order.append(col)
-                
-                category_stats_formatted = category_stats_formatted[column_order]
-                
-                st.dataframe(category_stats_formatted, use_container_width=True)
-            else:
-                st.info("수량, 매출기준액, 매출총이익 컬럼을 찾을 수 없습니다.")
+            # 플랫폼별 상세 통계 테이블 (중복으로 인해 숨김 처리)
+            # st.markdown("#### 📊 플랫폼별 상세 통계")
+            # 
+            # # 수량과 매출 컬럼 찾기
+            # # I열 찾기 (판매 수량, 9번째 컬럼, 인덱스 8)
+            # i_column_index = 8
+            # sales_qty_col = None
+            # if len(df.columns) > i_column_index:
+            #     sales_qty_col = df.columns[i_column_index]
+            # 
+            # # J열 찾기 (총 매출, 10번째 컬럼, 인덱스 9)
+            # j_column_index = 9
+            # revenue_col = None
+            # if len(df.columns) > j_column_index:
+            #     revenue_col = df.columns[j_column_index]
+            # 
+            # # O열 찾기 (이익률, 15번째 컬럼, 인덱스 14)
+            # o_column_index = 14
+            # profit_rate_col = None
+            # if len(df.columns) > o_column_index:
+            #     profit_rate_col = df.columns[o_column_index]
+            # 
+            # # K열 찾기 (매출원가, 11번째 컬럼, 인덱스 10) - 마진율 계산용
+            # k_column_index = 10
+            # cost_col = None
+            # if len(df.columns) > k_column_index:
+            #     cost_col = df.columns[k_column_index]
+            # 
+            # # 플랫폼별 통계 계산
+            # agg_dict = {}
+            # 
+            # # 수량 통계 (합계만)
+            # if sales_qty_col:
+            #     if df[sales_qty_col].dtype == 'object':
+            #         df[sales_qty_col] = pd.to_numeric(df[sales_qty_col], errors='coerce')
+            #     agg_dict[sales_qty_col] = 'sum'
+            # 
+            # # 매출 통계 (합계만)
+            # if revenue_col:
+            #     if df[revenue_col].dtype == 'object':
+            #         df[revenue_col] = pd.to_numeric(df[revenue_col], errors='coerce')
+            #     agg_dict[revenue_col] = 'sum'
+            # 
+            # if agg_dict:
+            #     # 수량과 매출만 집계 (합계만)
+            #     category_stats = df.groupby(category_col).agg(agg_dict)
+            #     
+            #     # 컬럼명 정리
+            #     category_stats = category_stats.rename(columns={
+            #         sales_qty_col: '수량_합계' if sales_qty_col else None,
+            #         revenue_col: '매출_합계' if revenue_col else None
+            #     })
+            #     # None 값 제거
+            #     category_stats = category_stats.dropna(axis=1, how='all')
+            #     
+            #     # 평균 마진율 계산
+            #     if profit_rate_col:
+            #         # O열 이익률 사용
+            #         if df[profit_rate_col].dtype == 'object':
+            #             df[profit_rate_col] = pd.to_numeric(df[profit_rate_col], errors='coerce')
+            #         profit_rate_avg = df.groupby(category_col)[profit_rate_col].mean()
+            #         # 값이 1 미만이면 100을 곱해서 백분율로 변환
+            #         profit_rate_avg = profit_rate_avg.apply(lambda x: x * 100 if abs(x) < 1 else x)
+            #         category_stats['평균_마진율'] = profit_rate_avg.round(1)
+            #     elif revenue_col and cost_col:
+            #         # 매출과 매출원가로 마진율 계산
+            #         if df[cost_col].dtype == 'object':
+            #             df[cost_col] = pd.to_numeric(df[cost_col], errors='coerce')
+            #         revenue_sum = df.groupby(category_col)[revenue_col].sum()
+            #         cost_sum = df.groupby(category_col)[cost_col].sum()
+            #         category_stats['평균_마진율'] = ((revenue_sum - cost_sum) / revenue_sum * 100).round(1)
+            #     
+            #     # 표시용 데이터 준비
+            #     category_stats_display = category_stats.copy()
+            #     
+            #     # 수량과 매출은 천단위 구분 기호 적용
+            #     if '수량_합계' in category_stats_display.columns:
+            #         category_stats_display['수량_합계'] = category_stats_display['수량_합계'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "")
+            #     if '매출_합계' in category_stats_display.columns:
+            #         category_stats_display['매출_합계'] = category_stats_display['매출_합계'].apply(lambda x: f"{int(x):,}원" if pd.notna(x) else "")
+            #     
+            #     # 정렬 옵션 추가
+            #     sort_options = []
+            #     if '수량_합계' in category_stats.columns:
+            #         sort_options.append('수량_합계 높은 순')
+            #     if '매출_합계' in category_stats.columns:
+            #         sort_options.append('매출_합계 높은 순')
+            #     if '평균_마진율' in category_stats.columns:
+            #         sort_options.append('평균_마진율 높은 순')
+            #     
+            #     # 인덱스를 컬럼으로 변환 (플랫폼 컬럼)
+            #     category_stats_with_index = category_stats.reset_index()
+            #     # 인덱스 컬럼명을 플랫폼 컬럼명으로 명시적으로 설정
+            #     if category_col not in category_stats_with_index.columns:
+            #         # 첫 번째 컬럼이 인덱스에서 변환된 플랫폼 컬럼
+            #         first_col = category_stats_with_index.columns[0]
+            #         category_stats_with_index = category_stats_with_index.rename(columns={first_col: category_col})
+            #     
+            #     if len(sort_options) > 0:
+            #         sort_option = st.selectbox("정렬 기준", sort_options, key='detail_stats_sort')
+            #         
+            #         # 정렬 수행
+            #         if sort_option == '수량_합계 높은 순':
+            #             category_stats_sorted = category_stats_with_index.sort_values('수량_합계', ascending=False, na_position='last').reset_index(drop=True)
+            #         elif sort_option == '매출_합계 높은 순':
+            #             category_stats_sorted = category_stats_with_index.sort_values('매출_합계', ascending=False, na_position='last').reset_index(drop=True)
+            #         elif sort_option == '평균_마진율 높은 순':
+            #             category_stats_sorted = category_stats_with_index.sort_values('평균_마진율', ascending=False, na_position='last').reset_index(drop=True)
+            #         else:
+            #             category_stats_sorted = category_stats_with_index.reset_index(drop=True)
+            #     else:
+            #         category_stats_sorted = category_stats_with_index.reset_index(drop=True)
+            #     
+            #     # 표시용 데이터 준비 (정렬된 데이터 사용)
+            #     category_stats_display = category_stats_sorted.copy()
+            #     
+            #     # 수량과 매출은 천단위 구분 기호 적용
+            #     if '수량_합계' in category_stats_display.columns:
+            #         category_stats_display['수량_합계'] = category_stats_display['수량_합계'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "")
+            #     if '매출_합계' in category_stats_display.columns:
+            #         category_stats_display['매출_합계'] = category_stats_display['매출_합계'].apply(lambda x: f"{int(x):,}원" if pd.notna(x) else "")
+            #     
+            #     # 평균 마진율은 소수점 한 자리로 표시
+            #     if '평균_마진율' in category_stats_display.columns:
+            #         category_stats_display['평균_마진율'] = category_stats_display['평균_마진율'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "")
+            #     
+            #     # 컬럼 순서 정리: 플랫폼, 수량_합계, 매출_합계, 평균_마진율
+            #     display_cols = []
+            #     # 플랫폼 컬럼 추가
+            #     if category_col in category_stats_display.columns:
+            #         display_cols.append(category_col)
+            #     
+            #     if '수량_합계' in category_stats_display.columns:
+            #         display_cols.append('수량_합계')
+            #     if '매출_합계' in category_stats_display.columns:
+            #         display_cols.append('매출_합계')
+            #     if '평균_마진율' in category_stats_display.columns:
+            #         display_cols.append('평균_마진율')
+            #     
+            #     st.dataframe(category_stats_display[display_cols], use_container_width=True, hide_index=True)
+            # else:
+            #     st.warning("⚠️ 수량 또는 매출 컬럼을 찾을 수 없습니다.")
         else:
             st.info("분석 가능한 카테고리 컬럼을 찾지 못했습니다.")
         
-        # 데이터 요약 정보
-        with st.expander("📊 데이터 요약 정보 보기"):
-            col1, col2 = st.columns(2)
-            with col1:
-                st.markdown("**기본 정보**")
-                st.write(f"- 총 행 수: {len(df):,}건")
-                st.write(f"- 총 컬럼 수: {len(df.columns)}개")
-                st.write(f"- 결측치: {df.isnull().sum().sum()}개")
-            with col2:
-                st.markdown("**컬럼 목록**")
-                for i, col in enumerate(df.columns, 1):
-                    dtype = df[col].dtype
-                    unique_count = df[col].nunique()
-                    st.write(f"{i}. {col} ({dtype}, 고유값: {unique_count}개)")
+        # 데이터 요약 정보 (숨김)
+        # with st.expander("📊 데이터 요약 정보 보기"):
+        #     col1, col2 = st.columns(2)
+        #     with col1:
+        #         st.markdown("**기본 정보**")
+        #         st.write(f"- 총 행 수: {len(df):,}건")
+        #         st.write(f"- 총 컬럼 수: {len(df.columns)}개")
+        #         st.write(f"- 결측치: {df.isnull().sum().sum()}개")
+        #     with col2:
+        #         st.markdown("**컬럼 목록**")
+        #         for i, col in enumerate(df.columns, 1):
+        #             dtype = df[col].dtype
+        #             unique_count = df[col].nunique()
+        #             st.write(f"{i}. {col} ({dtype}, 고유값: {unique_count}개)")
         
         # 상세 데이터 테이블
-        st.subheader(f"📋 {month_display} 상세 데이터")
+        month_label = f"{selected_month}월" if selected_month is not None else "월"
+        st.subheader(f"📋 {month_label} 상세 데이터")
         
         # 검색 및 필터 기능
         col_search, col_filter = st.columns([3, 1])
@@ -1232,10 +1550,11 @@ if uploaded_file is not None:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         
-        # 판매 데이터 분석 섹션 추가 (11월 상세 데이터 하단)
-        if os.path.exists(sales_data_path):
+        # 판매 데이터 분석 섹션 추가 (선택된 월 상세 데이터 하단) - 숨김
+        if False and os.path.exists(sales_data_path):
             st.markdown("---")
-            st.subheader(f"📦 상품 판매 분석 (2025 정산서 기준 {month_display}까지)")
+            month_label = f"{selected_month}월" if selected_month is not None else "월"
+            st.subheader(f"📦 상품 판매 분석 (2025 정산서 기준 {month_label}까지)")
             
             try:
                 sales_xls = pd.ExcelFile(sales_data_path)
@@ -1315,247 +1634,63 @@ if uploaded_file is not None:
                             if len(company_counts) > 0:
                                 manufacturer_mapping[product_code] = company_counts.index[0]
                     
-                    # A열(제조사)별로 I열(업체지급금액) 집계
-                    st.markdown("#### 업체별 정산금액")
+                    # 1. 업체별로 판매가 가장 많이 된 상품코드
+                    st.markdown("#### 1️⃣ 업체별 최다 판매 상품")
                     
-                    # 다운로드를 위한 변수 초기화
-                    company_top_product = None
+                    # "코드별 판매수량" 컬럼이 있는지 확인 (이미 집계된 값일 수 있음)
+                    code_sales_col = None
+                    for col in sales_df.columns:
+                        if '코드별' in str(col) and '판매' in str(col) and '수량' in str(col):
+                            code_sales_col = col
+                            break
                     
-                    # A열 찾기 (1번째 컬럼, 인덱스 0)
-                    manufacturer_col_index = 0
-                    manufacturer_col = None
-                    if len(sales_df.columns) > manufacturer_col_index:
-                        manufacturer_col = sales_df.columns[manufacturer_col_index]
-                    
-                    # I열 찾기 (9번째 컬럼, 인덱스 8)
-                    payment_col_index = 8
-                    payment_col = None
-                    if len(sales_df.columns) > payment_col_index:
-                        payment_col = sales_df.columns[payment_col_index]
+                    # 판매 수량 컬럼이 "코드별 판매수량"인 경우와 일반 수량 컬럼인 경우 구분
+                    if '코드별' in str(quantity_col) or code_sales_col:
+                        # "코드별 판매수량" 컬럼 사용 (이미 집계된 값)
+                        use_col = code_sales_col if code_sales_col else quantity_col
+                        if sales_df[use_col].dtype == 'object':
+                            sales_df[use_col] = pd.to_numeric(sales_df[use_col], errors='coerce')
                     else:
-                        # I열을 찾지 못한 경우 업체지급금액 컬럼 찾기
-                        payment_cols = [col for col in sales_df.columns if any(keyword in str(col).lower() for keyword in ['업체지급금액', '지급금액', '정산금액', 'payment'])]
-                        if len(payment_cols) > 0:
-                            payment_col = payment_cols[0]
+                        # 일반 수량 컬럼도 숫자형으로 변환
+                        if sales_df[quantity_col].dtype == 'object':
+                            sales_df[quantity_col] = pd.to_numeric(sales_df[quantity_col], errors='coerce')
+                        use_col = quantity_col
                     
-                    if manufacturer_col and payment_col:
-                        # 숫자형 변환
-                        if sales_df[payment_col].dtype == 'object':
-                            sales_df[payment_col] = pd.to_numeric(sales_df[payment_col], errors='coerce')
-                        
-                        # 제조사별 업체지급금액 집계
-                        manufacturer_payment = sales_df.groupby(manufacturer_col)[payment_col].sum().reset_index()
-                        manufacturer_payment.columns = ['업체', '정산금액']
-                        
-                        # 정산금액 높은 순으로 정렬
-                        manufacturer_payment = manufacturer_payment.sort_values('정산금액', ascending=False)
-                        
-                        # 천단위 구분 기호 적용
-                        manufacturer_payment_display = manufacturer_payment.copy()
-                        manufacturer_payment_display['정산금액'] = manufacturer_payment_display['정산금액'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
-                        
-                        st.dataframe(manufacturer_payment_display, use_container_width=True, height=300)
-                        
-                        # 다운로드를 위해 원본 데이터 저장 (천단위 구분 기호 없는 버전)
-                        company_top_product = manufacturer_payment.copy()
-                        
-                        # 월별 매출 분석 추가
-                        st.markdown("---")
-                        st.markdown("#### 📊 월별 매출 분석")
-                        
-                        # 날짜 컬럼 찾기
-                        sales_date_columns = sales_df.select_dtypes(include=['datetime64']).columns.tolist()
-                        for col in sales_df.columns:
-                            if sales_df[col].dtype == 'object':
-                                try:
-                                    test_date = pd.to_datetime(sales_df[col].dropna().iloc[0] if len(sales_df[col].dropna()) > 0 else None, errors='coerce')
-                                    if pd.notna(test_date):
-                                        sales_date_columns.append(col)
-                                except:
-                                    pass
-                        
-                        if len(sales_date_columns) > 0:
-                            sales_date_col = sales_date_columns[0]
-                            sales_df[sales_date_col] = pd.to_datetime(sales_df[sales_date_col], errors='coerce')
-                            sales_df['년'] = sales_df[sales_date_col].dt.year
-                            sales_df['월'] = sales_df[sales_date_col].dt.month
-                            sales_df['년월'] = sales_df[sales_date_col].dt.to_period('M')
-                            
-                            # I열(업체지급금액)이 있는 데이터만 사용하고 12월 제외
-                            sales_df[payment_col] = pd.to_numeric(sales_df[payment_col], errors='coerce')
-                            sales_df_with_payment = sales_df[sales_df[payment_col].notna() & (sales_df[payment_col] != 0)].copy()
-                            
-                            # 12월 제외
-                            sales_df_with_payment['년월_str'] = sales_df_with_payment['년월'].astype(str)
-                            sales_df_filtered = sales_df_with_payment[~sales_df_with_payment['년월_str'].str.contains('2024-12|2025-12|12월', na=False, regex=True)].copy()
-                            
-                            # I열 기준으로 월별 집계 (정확한 집계)
-                            # 년과 월 컬럼을 사용하여 정확하게 월별 집계
-                            if '월' in sales_df_filtered.columns and '년' in sales_df_filtered.columns:
-                                # 년과 월을 조합하여 정확한 월별 집계
-                                monthly_payment_list = []
-                                for year in sorted(sales_df_filtered['년'].dropna().unique()):
-                                    for month in range(1, 12):  # 12월 제외
-                                        month_mask = (sales_df_filtered['년'] == year) & (sales_df_filtered['월'] == month)
-                                        month_data = sales_df_filtered[month_mask]
-                                        if len(month_data) > 0:
-                                            month_total = month_data[payment_col].sum()
-                                            month_period = pd.Period(f'{int(year)}-{month:02d}', freq='M')
-                                            monthly_payment_list.append({'년월': month_period, '매출총이익': month_total})
-                                
-                                if len(monthly_payment_list) > 0:
-                                    monthly_payment = pd.DataFrame(monthly_payment_list)
-                                    monthly_payment = monthly_payment.sort_values('년월')
-                                else:
-                                    monthly_payment = pd.DataFrame(columns=['년월', '매출총이익'])
-                            else:
-                                # 년월 컬럼만 있는 경우
-                                monthly_payment = sales_df_filtered.groupby('년월', as_index=False)[payment_col].sum()
-                                monthly_payment.columns = ['년월', '매출총이익']
-                                monthly_payment = monthly_payment.sort_values('년월')
-                            
-                            # 각 월별 정확한 값으로 업데이트 (2025년 기준)
-                            monthly_amounts = {
-                                '2025-01': 23290017,
-                                '2025-02': 20003838,
-                                '2025-03': 18924280,
-                                '2025-04': 23528759,
-                                '2025-05': 24544760,
-                                '2025-06': 22182939,
-                                '2025-07': 90013289,
-                                '2025-08': 38355057,
-                                '2025-09': 68243253,
-                                '2025-10': 61020050,
-                                '2025-11': 45450249,
-                            }
-                            
-                            # 각 월별로 정확한 값 설정
-                            for month_str, amount in monthly_amounts.items():
-                                month_period = pd.Period(month_str, freq='M')
-                                if month_period in monthly_payment['년월'].values:
-                                    monthly_payment.loc[monthly_payment['년월'] == month_period, '매출총이익'] = amount
-                                else:
-                                    # 해당 월 데이터가 없으면 추가
-                                    new_row = pd.DataFrame({'년월': [month_period], '매출총이익': [amount]})
-                                    monthly_payment = pd.concat([monthly_payment, new_row], ignore_index=True)
-                            
-                            # 정렬 다시 수행
-                            monthly_payment = monthly_payment.sort_values('년월')
-                            
-                            # 전월 대비 성장률 계산
-                            monthly_payment['전월매출'] = monthly_payment['매출총이익'].shift(1)
-                            monthly_payment['성장률'] = ((monthly_payment['매출총이익'] - monthly_payment['전월매출']) / monthly_payment['전월매출'] * 100).round(2)
-                            monthly_payment['년월_표시'] = monthly_payment['년월'].astype(str)
-                            
-                            col_analysis1, col_analysis2, col_analysis3, col_analysis4 = st.columns(4)
-                            
-                            with col_analysis1:
-                                # 성장한 달
-                                growth_months = monthly_payment[monthly_payment['성장률'] > 0].copy()
-                                if len(growth_months) > 0:
-                                    max_growth = growth_months.loc[growth_months['성장률'].idxmax()]
-                                    st.metric(
-                                        "📈 성장한 달",
-                                        f"{max_growth['년월_표시']}",
-                                        delta=f"{max_growth['성장률']:.1f}%",
-                                        help=f"매출: {max_growth['매출총이익']:,.0f}원"
-                                    )
-                                else:
-                                    st.metric("📈 성장한 달", "없음")
-                            
-                            with col_analysis2:
-                                # 급감한 달
-                                decline_months = monthly_payment[monthly_payment['성장률'] < 0].copy()
-                                if len(decline_months) > 0:
-                                    max_decline = decline_months.loc[decline_months['성장률'].idxmin()]
-                                    st.metric(
-                                        "📉 급감한 달",
-                                        f"{max_decline['년월_표시']}",
-                                        delta=f"{max_decline['성장률']:.1f}%",
-                                        help=f"매출: {max_decline['매출총이익']:,.0f}원"
-                                    )
-                                else:
-                                    st.metric("📉 급감한 달", "없음")
-                            
-                            with col_analysis3:
-                                # 최고 매출 월
-                                max_sales_month = monthly_payment.loc[monthly_payment['매출총이익'].idxmax()]
-                                st.metric(
-                                    "🎯 최고 매출 월",
-                                    f"{max_sales_month['년월_표시']}",
-                                    delta=f"{max_sales_month['매출총이익']:,.0f}원",
-                                    help=f"전월 대비: {max_sales_month['성장률']:.1f}%"
-                                )
-                            
-                            with col_analysis4:
-                                # 부진 월 (평균 대비 낮은 월)
-                                avg_sales = monthly_payment['매출총이익'].mean()
-                                weak_months = monthly_payment[monthly_payment['매출총이익'] < avg_sales * 0.8].copy()
-                                if len(weak_months) > 0:
-                                    weakest_month = weak_months.loc[weak_months['매출총이익'].idxmin()]
-                                    st.metric(
-                                        "⚠ 부진 월",
-                                        f"{weakest_month['년월_표시']}",
-                                        delta=f"{weakest_month['매출총이익']:,.0f}원",
-                                        help=f"평균 대비: {((weakest_month['매출총이익'] / avg_sales - 1) * 100):.1f}%"
-                                    )
-                                else:
-                                    st.metric("⚠ 부진 월", "없음")
-                            
-                            # 월별 업체지급금액(정산금액) 그래프
-                            st.markdown("---")
-                            st.markdown("#### 📊 월별 업체지급금액(정산금액) 추이")
-                            
-                            # 바 차트와 라인 차트를 함께 표시
-                            col_chart1, col_chart2 = st.columns(2)
-                            
-                            with col_chart1:
-                                # 월별 정산금액 바 차트
-                                fig_bar = px.bar(
-                                    monthly_payment,
-                                    x='년월_표시',
-                                    y='매출총이익',
-                                    title='월별 정산금액 (바 차트)',
-                                    labels={'매출총이익': '정산금액 (원)', '년월_표시': '년월'},
-                                    color='매출총이익',
-                                    color_continuous_scale='Blues'
-                                )
-                                fig_bar.update_layout(
-                                    xaxis_title="년월",
-                                    yaxis_title="정산금액 (원)",
-                                    yaxis=dict(tickformat=','),
-                                    showlegend=False
-                                )
-                                fig_bar.update_traces(
-                                    hovertemplate='<b>%{x}</b><br>정산금액: %{y:,.0f}원<extra></extra>'
-                                )
-                                st.plotly_chart(fig_bar, use_container_width=True, key="monthly_payment_bar")
-                            
-                            with col_chart2:
-                                # 월별 정산금액 라인 차트
-                                fig_line = px.line(
-                                    monthly_payment,
-                                    x='년월_표시',
-                                    y='매출총이익',
-                                    title='월별 정산금액 (라인 차트)',
-                                    labels={'매출총이익': '정산금액 (원)', '년월_표시': '년월'},
-                                    markers=True
-                                )
-                                fig_line.update_layout(
-                                    xaxis_title="년월",
-                                    yaxis_title="정산금액 (원)",
-                                    yaxis=dict(tickformat=','),
-                                    hovermode='x unified'
-                                )
-                                fig_line.update_traces(
-                                    hovertemplate='<b>%{x}</b><br>정산금액: %{y:,.0f}원<extra></extra>'
-                                )
-                                st.plotly_chart(fig_line, use_container_width=True, key="monthly_payment_line")
-                            
-                        else:
-                            st.info("💡 날짜 컬럼을 찾을 수 없어 월별 분석을 할 수 없습니다.")
+                    # 상품코드별로 제조사 정보 추가 (원본 업체 컬럼 기반)
+                    # 상품코드별로 가장 많이 나타나는 업체를 제조사로 사용
+                    if len(manufacturer_mapping) > 0:
+                        sales_df['제조사'] = sales_df[product_col].map(manufacturer_mapping)
+                        # 매핑되지 않은 경우 원본 company_col 사용
+                        sales_df['제조사'] = sales_df['제조사'].fillna(sales_df[company_col])
                     else:
-                        st.warning(f"⚠️ A열(제조사) 또는 I열(업체지급금액)을 찾을 수 없습니다. A열: {manufacturer_col}, I열: {payment_col}")
+                        # 매핑이 없는 경우 원본 company_col 사용
+                        sales_df['제조사'] = sales_df[company_col]
+                    
+                    # 제조사별, 상품코드별로 첫 번째 값 사용 (중복 제거, 합산하지 않음)
+                    company_product_sales = sales_df.groupby(['제조사', product_col])[use_col].first().reset_index()
+                    company_product_sales.columns = ['제조사', product_col, '판매수량_집계']
+                    
+                    # 제조사별로 판매수량이 가장 큰 상품 하나만 찾기
+                    company_top_product = company_product_sales.groupby('제조사').apply(
+                        lambda x: x.loc[x['판매수량_집계'].idxmax()]
+                    ).reset_index(drop=True)
+                    company_top_product = company_top_product.rename(columns={'판매수량_집계': quantity_col})
+                    
+                    # 컬럼명 변경 (실제 컬럼명 사용)
+                    company_top_product = company_top_product.rename(columns={'제조사': '업체', product_col: '상품코드_원본', quantity_col: '판매수량_원본'})
+                    
+                    # 상품명 추가
+                    if product_mapping:
+                        company_top_product['상품명'] = company_top_product['상품코드_원본'].map(product_mapping)
+                        company_top_product['상품명'] = company_top_product['상품명'].fillna(company_top_product['상품코드_원본'])
+                        display_cols = ['업체', '상품명', '판매수량']
+                    else:
+                        company_top_product['상품코드'] = company_top_product['상품코드_원본']
+                        display_cols = ['업체', '상품코드', '판매수량']
+                    
+                    company_top_product_display = company_top_product.copy()
+                    company_top_product_display['판매수량'] = company_top_product_display['판매수량_원본'].apply(lambda x: f"{int(x):,}")
+                    st.dataframe(company_top_product_display[display_cols], use_container_width=True, height=300)
                     
                     # 2. 중복 제거하여 전체 상품별 판매 수량 (2539가지)
                     st.markdown("---")
@@ -1703,10 +1838,17 @@ if uploaded_file is not None:
                                 download_product = product_sales[['상품코드', '총판매수량']].copy()
                             download_product.to_excel(writer, index=False, sheet_name='상품별판매수량')
                             
-                            # 업체별 정산금액 저장
-                            if company_top_product is not None:
-                                download_company = company_top_product.copy()
-                                download_company.to_excel(writer, index=False, sheet_name='업체별정산금액')
+                            # 업체별 최다 판매 상품도 상품명 포함 (상품코드도 함께 저장)
+                            download_company = company_top_product.copy()
+                            if product_mapping:
+                                download_company['상품코드'] = download_company['상품코드_원본']
+                                download_company = download_company[['업체', '상품명', '상품코드', '판매수량_원본']]
+                                download_company.columns = ['업체', '상품명', '상품코드', '판매수량']
+                            else:
+                                download_company['상품코드'] = download_company['상품코드_원본']
+                                download_company = download_company[['업체', '상품코드', '판매수량_원본']]
+                                download_company.columns = ['업체', '상품코드', '판매수량']
+                            download_company.to_excel(writer, index=False, sheet_name='업체별최다판매상품')
                         
                         st.download_button(
                             label="📥 Excel 다운로드",
