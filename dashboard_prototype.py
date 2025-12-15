@@ -1244,16 +1244,49 @@ if uploaded_file is not None:
             with col1:
                 # 바 차트 (상위 10개)
                 category_data = df[category_col].value_counts().head(10)
+                
+                # 플랫폼별 정렬 순서 지정 (부분 일치 허용)
+                priority_order = ['삼성베네포유', '삼성카드몰', '애터미아자', '캐시딜', '복지드림']
+                
+                # 우선순위 플랫폼과 나머지 플랫폼 분리 (부분 일치로 찾기)
+                priority_platforms = []
+                other_platforms = []
+                
+                # 실제 데이터의 플랫폼 이름과 우선순위 이름 매칭
+                for priority_name in priority_order:
+                    for platform in category_data.index:
+                        if priority_name in str(platform) or str(platform) in priority_name:
+                            if platform not in priority_platforms:
+                                priority_platforms.append(platform)
+                                break
+                
+                for platform in category_data.index:
+                    if platform not in priority_platforms:
+                        other_platforms.append(platform)
+                
+                # 우선순위 플랫폼을 먼저, 나머지는 판매수량 순으로 정렬
+                sorted_platforms = priority_platforms + sorted(other_platforms, key=lambda x: category_data[x], reverse=True)
+                
+                # 차트에서 상단에 우선순위 플랫폼이 오도록 역순으로 정렬
+                sorted_platforms_reversed = sorted_platforms[::-1]
+                
+                # 정렬된 순서대로 데이터 재구성
+                category_data_sorted = category_data.reindex(sorted_platforms_reversed)
+                
                 fig_bar = px.bar(
-                    x=category_data.values,
-                    y=category_data.index,
+                    x=category_data_sorted.values,
+                    y=category_data_sorted.index,
                     orientation='h',
                     title=f'{category_col}별 분포 (상위 10개)',
                     labels={'x': '총 판매수량', 'y': category_col},
-                    color=category_data.values,
+                    color=category_data_sorted.values,
                     color_continuous_scale='Viridis'
                 )
-                fig_bar.update_layout(showlegend=False)
+                # Y축 순서를 반대로 설정하여 상단에 우선순위 플랫폼이 오도록
+                fig_bar.update_layout(
+                    showlegend=False,
+                    yaxis={'categoryorder': 'array', 'categoryarray': sorted_platforms_reversed}
+                )
                 # 툴팁에서 컬러 정보 숨기기
                 fig_bar.update_traces(
                     hovertemplate=f'<b>%{{y}}</b><br>총 판매수량: %{{x}}<extra></extra>'
@@ -1403,109 +1436,70 @@ if uploaded_file is not None:
             if selected_month == 12:
                 default_memo = """★ 업무 진행 현황
 
-
-
 * 교육 이수진행 (최승영 / 장지웅) 완료
-
 : 장지웅 프로는 추가로 교육필요한 인증서가 있어 추가 교육진행중
 
 * 메가존 제안서 승인완료 상품 등록 (오가닉K + 2)
 
 * 애터미 특가구좌 진행
-
 : 미고가 제품 진행 (월 화 수) - 1+1 귀걸이 목걸이 쥬얼리 2세트
-
 : 에스씨컴퍼니 떡 + 미고가 정수리가발 (목) 진행
-
 : 소노스퀘어 이불 셋트 (토) 진행
-
 : 미고가 쥬얼리세트 2종 (일요일) 진행
 
 *이제너두 운영관련 MD와 협의
-
 : 상품 등록수 늘리기 (E-카탈로그형식으로 상시제품보다가 특판 문의 들어올수 있음)
-
 : 공지사항에 기재되는 특판 및 행사건 최대한 저렴하게 진행 요청
-
 : 공지사항 행사건 처리 잘해주면 그다음 특판제안 관련 받을수 있을수 있음
-
 : 상시매출도 높아야 특판 기회 가능성 있음
-
 : 기존에 특판기업들이 있기때문에 그 기업들보다 저렴하게 진행해야 추후 진행가능
-
   (너무많은 제안서가 들어오기떄문에 기존 특판기업에 의존도 95%) 
 
 *전문 특판업체 필요성
-
 : 특판의 경우 전문적으로 진행하는 회사들이 존재하여 상품 의뢰할 기업 찾기
-
 : 자체적으로 진행하기에는 특판구조에 맞지않는 제품들이 대다수 (상위 브랜드 제품의 보유사항)
-
 : 특판이 존재하는 폐쇄몰 기준 특판 진행할수 있는 매출 및 상품수 확보할때까지만 의뢰 예정
 
 *신규제품 상품 관련 정리
-
 : 맥널티 일농 / 디에스엠 (최저가 안맞아서 제안서 다시 요청)
-
 : 소셜빈은 제품 상세페이지 부터 진행되어야 함
-
   (제품 300개 정도 - 정상가 대비 75%공급가 : 최저가는 따로 조사 예정)
-
 : 닥터엠 생수의경우 복지몰의 중복코드가 있어서 정리 요청 및 단가 인하 요청
-
 : 순창성가정식품 많은제품 모두 제안 요청
-
    고추장 된장 등 면세제품 과세제품으로 1월1일부터 변경예정이어서 
-
    해당제품들 모두 상품 내리고 다시 올려야함
-
 : 위랩 신규제품 제안 요청 진행 / 최저가에 맞추어 가격설정 요청
 
 ---------------------------------------------------------------------------------------------------------------------------------
 
 * 설 명절 제안서 관련 이슈
-
 : 자체 가상 취합일정 - 12/19
-
 : 실제 삼성 취합일정 - 12/17 오전 11시까지
-
 : 다시 일정관련하여 메일 재발송 진행 - 중요업체는 유선으로 재촉 진행
 
 * 애터미 추가 특가 상품 제안예정
-
 : 쿠첸 밥솥 특가 예정 + 업체 특가 요청 진행
 
 * 한화 복지몰 마사지기 상품 제안 
-
 : 누가의료기 선정하여 요청 하였고,
-
  금액 확인 후 상품 제안 예정
 
 * 올웨이지 미팅 요청
-
 : 판매 활성화를 위해 미팅 요청 진행
-
 : 메일로 주요 상품군 전달 진행
 
 * PNS로지스틱스 (말레이시아 물류파트너)
-
  : 간략하게 스마트공장 리스트 및 진행제품 카테고리 정리해서 
-
    신동인 팀장에게 공유 진행
 
 *홈페이지 관련 모니터링
-
 비즈마켓
-
 https://www.bizmarket.com/
-
 제이슨그룹
-
 https://jasongroup.co.kr/
-
 엘슈퍼비젼
-
-https://elsupervision.com/default/"""
+https://elsupervision.com/default/
+"""
                 st.session_state[memo_key] = default_memo
             else:
                 st.session_state[memo_key] = ""
@@ -1526,7 +1520,11 @@ https://elsupervision.com/default/"""
         # 저장된 메모 표시 (입력창과 별도로)
         if st.session_state[memo_key]:
             with st.expander("📋 저장된 메모 보기", expanded=False):
-                st.markdown(st.session_state[memo_key])
+                # 줄바꿈을 보존하기 위해 \n을 <br>로 변환하거나 st.text 사용
+                # st.text는 줄바꿈을 그대로 표시하지만 마크다운 형식은 지원하지 않음
+                # st.markdown은 줄바꿈을 보존하려면 \n\n이 필요하므로, \n을 <br>로 변환
+                memo_display = st.session_state[memo_key].replace('\n', '<br>')
+                st.markdown(memo_display, unsafe_allow_html=True)
         
         # 회의결과 및 경영자의견 메모장 추가
         st.markdown("---")
