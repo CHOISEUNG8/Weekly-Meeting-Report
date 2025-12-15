@@ -1337,165 +1337,7 @@ if uploaded_file is not None:
                     )
                     st.plotly_chart(fig_profit_pie, use_container_width=True)
             
-            # 플랫폼별 상세 통계 테이블 (중복으로 인해 숨김 처리)
-            # st.markdown("#### 📊 플랫폼별 상세 통계")
-            # 
-            # # 수량과 매출 컬럼 찾기
-            # # I열 찾기 (판매 수량, 9번째 컬럼, 인덱스 8)
-            # i_column_index = 8
-            # sales_qty_col = None
-            # if len(df.columns) > i_column_index:
-            #     sales_qty_col = df.columns[i_column_index]
-            # 
-            # # J열 찾기 (총 매출, 10번째 컬럼, 인덱스 9)
-            # j_column_index = 9
-            # revenue_col = None
-            # if len(df.columns) > j_column_index:
-            #     revenue_col = df.columns[j_column_index]
-            # 
-            # # O열 찾기 (이익률, 15번째 컬럼, 인덱스 14)
-            # o_column_index = 14
-            # profit_rate_col = None
-            # if len(df.columns) > o_column_index:
-            #     profit_rate_col = df.columns[o_column_index]
-            # 
-            # # K열 찾기 (매출원가, 11번째 컬럼, 인덱스 10) - 마진율 계산용
-            # k_column_index = 10
-            # cost_col = None
-            # if len(df.columns) > k_column_index:
-            #     cost_col = df.columns[k_column_index]
-            # 
-            # # 플랫폼별 통계 계산
-            # agg_dict = {}
-            # 
-            # # 수량 통계 (합계만)
-            # if sales_qty_col:
-            #     if df[sales_qty_col].dtype == 'object':
-            #         df[sales_qty_col] = pd.to_numeric(df[sales_qty_col], errors='coerce')
-            #     agg_dict[sales_qty_col] = 'sum'
-            # 
-            # # 매출 통계 (합계만)
-            # if revenue_col:
-            #     if df[revenue_col].dtype == 'object':
-            #         df[revenue_col] = pd.to_numeric(df[revenue_col], errors='coerce')
-            #     agg_dict[revenue_col] = 'sum'
-            # 
-            # if agg_dict:
-            #     # 수량과 매출만 집계 (합계만)
-            #     category_stats = df.groupby(category_col).agg(agg_dict)
-            #     
-            #     # 컬럼명 정리
-            #     category_stats = category_stats.rename(columns={
-            #         sales_qty_col: '수량_합계' if sales_qty_col else None,
-            #         revenue_col: '매출_합계' if revenue_col else None
-            #     })
-            #     # None 값 제거
-            #     category_stats = category_stats.dropna(axis=1, how='all')
-            #     
-            #     # 평균 마진율 계산
-            #     if profit_rate_col:
-            #         # O열 이익률 사용
-            #         if df[profit_rate_col].dtype == 'object':
-            #             df[profit_rate_col] = pd.to_numeric(df[profit_rate_col], errors='coerce')
-            #         profit_rate_avg = df.groupby(category_col)[profit_rate_col].mean()
-            #         # 값이 1 미만이면 100을 곱해서 백분율로 변환
-            #         profit_rate_avg = profit_rate_avg.apply(lambda x: x * 100 if abs(x) < 1 else x)
-            #         category_stats['평균_마진율'] = profit_rate_avg.round(1)
-            #     elif revenue_col and cost_col:
-            #         # 매출과 매출원가로 마진율 계산
-            #         if df[cost_col].dtype == 'object':
-            #             df[cost_col] = pd.to_numeric(df[cost_col], errors='coerce')
-            #         revenue_sum = df.groupby(category_col)[revenue_col].sum()
-            #         cost_sum = df.groupby(category_col)[cost_col].sum()
-            #         category_stats['평균_마진율'] = ((revenue_sum - cost_sum) / revenue_sum * 100).round(1)
-            #     
-            #     # 표시용 데이터 준비
-            #     category_stats_display = category_stats.copy()
-            #     
-            #     # 수량과 매출은 천단위 구분 기호 적용
-            #     if '수량_합계' in category_stats_display.columns:
-            #         category_stats_display['수량_합계'] = category_stats_display['수량_합계'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "")
-            #     if '매출_합계' in category_stats_display.columns:
-            #         category_stats_display['매출_합계'] = category_stats_display['매출_합계'].apply(lambda x: f"{int(x):,}원" if pd.notna(x) else "")
-            #     
-            #     # 정렬 옵션 추가
-            #     sort_options = []
-            #     if '수량_합계' in category_stats.columns:
-            #         sort_options.append('수량_합계 높은 순')
-            #     if '매출_합계' in category_stats.columns:
-            #         sort_options.append('매출_합계 높은 순')
-            #     if '평균_마진율' in category_stats.columns:
-            #         sort_options.append('평균_마진율 높은 순')
-            #     
-            #     # 인덱스를 컬럼으로 변환 (플랫폼 컬럼)
-            #     category_stats_with_index = category_stats.reset_index()
-            #     # 인덱스 컬럼명을 플랫폼 컬럼명으로 명시적으로 설정
-            #     if category_col not in category_stats_with_index.columns:
-            #         # 첫 번째 컬럼이 인덱스에서 변환된 플랫폼 컬럼
-            #         first_col = category_stats_with_index.columns[0]
-            #         category_stats_with_index = category_stats_with_index.rename(columns={first_col: category_col})
-            #     
-            #     if len(sort_options) > 0:
-            #         sort_option = st.selectbox("정렬 기준", sort_options, key='detail_stats_sort')
-            #         
-            #         # 정렬 수행
-            #         if sort_option == '수량_합계 높은 순':
-            #             category_stats_sorted = category_stats_with_index.sort_values('수량_합계', ascending=False, na_position='last').reset_index(drop=True)
-            #         elif sort_option == '매출_합계 높은 순':
-            #             category_stats_sorted = category_stats_with_index.sort_values('매출_합계', ascending=False, na_position='last').reset_index(drop=True)
-            #         elif sort_option == '평균_마진율 높은 순':
-            #             category_stats_sorted = category_stats_with_index.sort_values('평균_마진율', ascending=False, na_position='last').reset_index(drop=True)
-            #         else:
-            #             category_stats_sorted = category_stats_with_index.reset_index(drop=True)
-            #     else:
-            #         category_stats_sorted = category_stats_with_index.reset_index(drop=True)
-            #     
-            #     # 표시용 데이터 준비 (정렬된 데이터 사용)
-            #     category_stats_display = category_stats_sorted.copy()
-            #     
-            #     # 수량과 매출은 천단위 구분 기호 적용
-            #     if '수량_합계' in category_stats_display.columns:
-            #         category_stats_display['수량_합계'] = category_stats_display['수량_합계'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "")
-            #     if '매출_합계' in category_stats_display.columns:
-            #         category_stats_display['매출_합계'] = category_stats_display['매출_합계'].apply(lambda x: f"{int(x):,}원" if pd.notna(x) else "")
-            #     
-            #     # 평균 마진율은 소수점 한 자리로 표시
-            #     if '평균_마진율' in category_stats_display.columns:
-            #         category_stats_display['평균_마진율'] = category_stats_display['평균_마진율'].apply(lambda x: f"{x:.1f}%" if pd.notna(x) else "")
-            #     
-            #     # 컬럼 순서 정리: 플랫폼, 수량_합계, 매출_합계, 평균_마진율
-            #     display_cols = []
-            #     # 플랫폼 컬럼 추가
-            #     if category_col in category_stats_display.columns:
-            #         display_cols.append(category_col)
-            #     
-            #     if '수량_합계' in category_stats_display.columns:
-            #         display_cols.append('수량_합계')
-            #     if '매출_합계' in category_stats_display.columns:
-            #         display_cols.append('매출_합계')
-            #     if '평균_마진율' in category_stats_display.columns:
-            #         display_cols.append('평균_마진율')
-            #     
-            #     st.dataframe(category_stats_display[display_cols], use_container_width=True, hide_index=True)
-            # else:
-            #     st.warning("⚠️ 수량 또는 매출 컬럼을 찾을 수 없습니다.")
-        else:
-            st.info("분석 가능한 카테고리 컬럼을 찾지 못했습니다.")
-        
-        # 데이터 요약 정보 (숨김)
-        # with st.expander("📊 데이터 요약 정보 보기"):
-        #     col1, col2 = st.columns(2)
-        #     with col1:
-        #         st.markdown("**기본 정보**")
-        #         st.write(f"- 총 행 수: {len(df):,}건")
-        #         st.write(f"- 총 컬럼 수: {len(df.columns)}개")
-        #         st.write(f"- 결측치: {df.isnull().sum().sum()}개")
-        #     with col2:
-        #         st.markdown("**컬럼 목록**")
-        #         for i, col in enumerate(df.columns, 1):
-        #             dtype = df[col].dtype
-        #             unique_count = df[col].nunique()
-        #             st.write(f"{i}. {col} ({dtype}, 고유값: {unique_count}개)")
+    
         
         # 상세 데이터 테이블
         month_label = f"{selected_month}월" if selected_month is not None else "월"
@@ -1549,6 +1391,60 @@ if uploaded_file is not None:
                 file_name=f"주간회의록_{datetime.now().strftime('%Y%m%d')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+        
+        # 메모장 기능 추가
+        st.markdown("---")
+        st.markdown(f"#### 📝 {month_label} 계획")
+        
+        # 세션 상태 초기화 (월별로 메모 저장)
+        memo_key = f"memo_{month_label}"
+        if memo_key not in st.session_state:
+            st.session_state[memo_key] = ""
+        
+        # 메모 입력
+        memo_text = st.text_area(
+            "메모를 입력하세요",
+            value=st.session_state[memo_key],
+            height=200,
+            placeholder="여기에 메모를 작성하세요. 내용은 세션 동안 유지됩니다.",
+            key=f"memo_input_{month_label}"
+        )
+        
+        # 메모 저장
+        if memo_text != st.session_state[memo_key]:
+            st.session_state[memo_key] = memo_text
+        
+        # 저장된 메모 표시 (입력창과 별도로)
+        if st.session_state[memo_key]:
+            with st.expander("📋 저장된 메모 보기", expanded=False):
+                st.markdown(st.session_state[memo_key])
+        
+        # 회의결과 및 경영자의견 메모장 추가
+        st.markdown("---")
+        st.markdown(f"#### 📝 {month_label} 회의결과 및 경영자의견")
+        
+        # 세션 상태 초기화 (월별로 회의결과 메모 저장)
+        meeting_memo_key = f"meeting_memo_{month_label}"
+        if meeting_memo_key not in st.session_state:
+            st.session_state[meeting_memo_key] = ""
+        
+        # 회의결과 메모 입력
+        meeting_memo_text = st.text_area(
+            "회의결과 및 경영자의견을 입력하세요",
+            value=st.session_state[meeting_memo_key],
+            height=200,
+            placeholder="회의결과 및 경영자의견을 작성하세요.",
+            key=f"meeting_memo_input_{month_label}"
+        )
+        
+        # 회의결과 메모 저장
+        if meeting_memo_text != st.session_state[meeting_memo_key]:
+            st.session_state[meeting_memo_key] = meeting_memo_text
+        
+        # 저장된 회의결과 메모 표시 (입력창과 별도로)
+        if st.session_state[meeting_memo_key]:
+            with st.expander("📋 저장된 회의결과 및 경영자의견 보기", expanded=False):
+                st.markdown(st.session_state[meeting_memo_key])
         
         # 판매 데이터 분석 섹션 추가 (선택된 월 상세 데이터 하단) - 숨김
         if False and os.path.exists(sales_data_path):
