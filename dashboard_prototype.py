@@ -373,6 +373,35 @@ if uploaded_file is not None:
             # 사이드바 필터
             st.sidebar.header("필터 옵션")
         
+        # 회의결과 및 경영자의견 메모장 추가 (사이드바)
+        month_label_sidebar = f"{selected_month}월" if selected_month is not None else "월"
+        st.sidebar.markdown("---")
+        st.sidebar.markdown(f"#### 📝 {month_label_sidebar} 회의결과 및 경영자의견")
+        
+        # 세션 상태 초기화 (월별로 회의결과 메모 저장)
+        meeting_memo_key_sidebar = f"meeting_memo_{month_label_sidebar}"
+        if meeting_memo_key_sidebar not in st.session_state:
+            st.session_state[meeting_memo_key_sidebar] = ""
+        
+        # 회의결과 메모 입력
+        meeting_memo_text_sidebar = st.sidebar.text_area(
+            "회의결과 및 경영자의견을 입력하세요",
+            value=st.session_state[meeting_memo_key_sidebar],
+            height=200,
+            placeholder="회의결과 및 경영자의견을 작성하세요.",
+            key=f"meeting_memo_input_sidebar_{month_label_sidebar}"
+        )
+        
+        # 회의결과 메모 저장
+        if meeting_memo_text_sidebar != st.session_state[meeting_memo_key_sidebar]:
+            st.session_state[meeting_memo_key_sidebar] = meeting_memo_text_sidebar
+        
+        # 저장된 회의결과 메모 표시 (입력창과 별도로)
+        if st.session_state[meeting_memo_key_sidebar]:
+            with st.sidebar.expander("📋 저장된 회의결과 및 경영자의견 보기", expanded=False):
+                meeting_memo_display_sidebar = st.session_state[meeting_memo_key_sidebar].replace('\n', '<br>')
+                st.sidebar.markdown(meeting_memo_display_sidebar, unsafe_allow_html=True)
+        
         if '년' in df.columns:
             years = sorted(df['년'].dropna().unique())
             selected_years = st.sidebar.multiselect("년도 선택", years, default=years)
@@ -1525,33 +1554,6 @@ https://elsupervision.com/default/
                 # st.markdown은 줄바꿈을 보존하려면 \n\n이 필요하므로, \n을 <br>로 변환
                 memo_display = st.session_state[memo_key].replace('\n', '<br>')
                 st.markdown(memo_display, unsafe_allow_html=True)
-        
-        # 회의결과 및 경영자의견 메모장 추가
-        st.markdown("---")
-        st.markdown(f"#### 📝 {month_label} 회의결과 및 경영자의견")
-        
-        # 세션 상태 초기화 (월별로 회의결과 메모 저장)
-        meeting_memo_key = f"meeting_memo_{month_label}"
-        if meeting_memo_key not in st.session_state:
-            st.session_state[meeting_memo_key] = ""
-        
-        # 회의결과 메모 입력
-        meeting_memo_text = st.text_area(
-            "회의결과 및 경영자의견을 입력하세요",
-            value=st.session_state[meeting_memo_key],
-            height=200,
-            placeholder="회의결과 및 경영자의견을 작성하세요.",
-            key=f"meeting_memo_input_{month_label}"
-        )
-        
-        # 회의결과 메모 저장
-        if meeting_memo_text != st.session_state[meeting_memo_key]:
-            st.session_state[meeting_memo_key] = meeting_memo_text
-        
-        # 저장된 회의결과 메모 표시 (입력창과 별도로)
-        if st.session_state[meeting_memo_key]:
-            with st.expander("📋 저장된 회의결과 및 경영자의견 보기", expanded=False):
-                st.markdown(st.session_state[meeting_memo_key])
         
         # 판매 데이터 분석 섹션 추가 (선택된 월 상세 데이터 하단) - 숨김
         if False and os.path.exists(sales_data_path):
