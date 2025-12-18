@@ -9,6 +9,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 from datetime import datetime
 import openpyxl
+import json
+import os
 
 # 페이지 설정
 st.set_page_config(
@@ -20,8 +22,33 @@ st.set_page_config(
 st.title("📊 주간 회의록 대시보드")
 st.markdown("---")
 
+# 메모 저장/로드 함수
+MEMO_DATA_DIR = "memo_data"
+if not os.path.exists(MEMO_DATA_DIR):
+    os.makedirs(MEMO_DATA_DIR)
+
+def save_memo_to_file(key, value):
+    """메모를 JSON 파일로 저장"""
+    try:
+        file_path = os.path.join(MEMO_DATA_DIR, f"{key}.json")
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump({"content": value}, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        st.error(f"메모 저장 중 오류 발생: {str(e)}")
+
+def load_memo_from_file(key):
+    """JSON 파일에서 메모 불러오기"""
+    try:
+        file_path = os.path.join(MEMO_DATA_DIR, f"{key}.json")
+        if os.path.exists(file_path):
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return data.get("content", "")
+    except Exception as e:
+        pass
+    return ""
+
 # 로컬 파일 또는 업로드 파일 사용
-import os
 
 excel_file_path = '주간회의록.xlsx'
 sales_data_path = '2025 정산서 기준 판매 데이터.xlsx'
@@ -373,34 +400,124 @@ if uploaded_file is not None:
             # 사이드바 필터
             st.sidebar.header("필터 옵션")
         
-        # 회의결과 및 경영자의견 메모장 추가 (사이드바)
+        # 회의결과 및 경영자의견 메모장 추가 (사이드바 - 주차별)
         month_label_sidebar = f"{selected_month}월" if selected_month is not None else "월"
         st.sidebar.markdown("---")
         st.sidebar.markdown(f"#### 📝 {month_label_sidebar} 회의결과 및 경영자의견")
         
-        # 세션 상태 초기화 (월별로 회의결과 메모 저장)
-        meeting_memo_key_sidebar = f"meeting_memo_{month_label_sidebar}"
-        if meeting_memo_key_sidebar not in st.session_state:
-            st.session_state[meeting_memo_key_sidebar] = ""
+        # 주차 정보 계산 (사이드바에서 사용하기 위해)
+        sidebar_weeks = []
+        if len(date_columns) > 0:
+            date_col = date_columns[0]
+            df_temp = df.copy()
+            df_temp[date_col] = pd.to_datetime(df_temp[date_col], errors='coerce')
+            df_temp['주차'] = df_temp[date_col].dt.isocalendar().week
+            min_week = df_temp['주차'].min() if len(df_temp) > 0 else None
+            
+            # 주차 번호를 한국어로 변환하는 함수
+            def week_to_korean_sidebar(week_num, min_week=None, month=None):
+                week_korean = ['첫째', '둘째', '셋째', '넷째', '다섯째']
+                month_label = f"{month}월" if month is not None else "월"
+                if min_week is not None:
+                    relative_week = week_num - min_week
+                    if 0 <= relative_week < len(week_korean):
+                        return f"{month_label} {week_korean[relative_week]}주"
+                return f"{month_label} {week_num}주"
+            
+            df_temp['주차_한글'] = df_temp['주차'].apply(lambda x: week_to_korean_sidebar(x, min_week, selected_month))
+            sidebar_weeks = sorted(df_temp['주차_한글'].unique())
         
-        # 회의결과 메모 입력
-        meeting_memo_text_sidebar = st.sidebar.text_area(
-            "회의결과 및 경영자의견을 입력하세요",
-            value=st.session_state[meeting_memo_key_sidebar],
-            height=200,
-            placeholder="회의결과 및 경영자의견을 작성하세요.",
-            key=f"meeting_memo_input_sidebar_{month_label_sidebar}"
-        )
-        
-        # 회의결과 메모 저장
-        if meeting_memo_text_sidebar != st.session_state[meeting_memo_key_sidebar]:
-            st.session_state[meeting_memo_key_sidebar] = meeting_memo_text_sidebar
-        
-        # 저장된 회의결과 메모 표시 (입력창과 별도로)
-        if st.session_state[meeting_memo_key_sidebar]:
-            with st.sidebar.expander("📋 저장된 회의결과 및 경영자의견 보기", expanded=False):
-                meeting_memo_display_sidebar = st.session_state[meeting_memo_key_sidebar].replace('\n', '<br>')
-                st.sidebar.markdown(meeting_memo_display_sidebar, unsafe_allow_html=True)
+        # 주차별 회의결과 및 경영자의견
+        if len(sidebar_weeks) > 0:
+            # 주차 선택
+            selected_week_sidebar = st.sidebar.selectbox(
+                "주차 선택", 
+                sidebar_weeks, 
+                key=f"week_select_sidebar_{month_label_sidebar}"
+            )
+            
+            # 선택된 주차의 회의결과 메모 키
+            meeting_memo_key_sidebar = f"meeting_memo_{month_label_sidebar}_{selected_week_sidebar}"
+            # 파일에서 메모 불러오기
+            if meeting_memo_key_sidebar not in st.session_state:
+                loaded_memo_sidebar = load_memo_from_file(meeting_memo_key_sidebar)
+                if loaded_memo_sidebar:
+                    st.session_state[meeting_memo_key_sidebar] = loaded_memo_sidebar
+                else:
+                    st.session_state[meeting_memo_key_sidebar] = ""
+            
+            # 회의결과 메모 입력
+            meeting_memo_text_sidebar = st.sidebar.text_area(
+                f"{selected_week_sidebar} 회의결과 및 경영자의견을 입력하세요",
+                value=st.session_state.get(meeting_memo_key_sidebar, ""),
+                height=200,
+                placeholder=f"{selected_week_sidebar} 회의결과 및 경영자의견을 작성하세요. 내용은 자동으로 저장됩니다.",
+                key=f"meeting_memo_input_sidebar_{month_label_sidebar}_{selected_week_sidebar}"
+            )
+            
+            # 회의결과 메모 저장 (입력 시마다 자동 저장)
+            if meeting_memo_text_sidebar != st.session_state.get(meeting_memo_key_sidebar, ""):
+                st.session_state[meeting_memo_key_sidebar] = meeting_memo_text_sidebar
+                save_memo_to_file(meeting_memo_key_sidebar, meeting_memo_text_sidebar)
+                st.sidebar.success(f"✅ {selected_week_sidebar} 회의결과가 저장되었습니다.", icon="💾")
+            
+            # 저장된 회의결과 메모 표시 (입력창과 별도로)
+            if st.session_state.get(meeting_memo_key_sidebar, ""):
+                with st.sidebar.expander(f"📋 저장된 {selected_week_sidebar} 회의결과 및 경영자의견 보기", expanded=False):
+                    meeting_memo_display_sidebar = st.session_state[meeting_memo_key_sidebar].replace('\n', '<br>')
+                    st.sidebar.markdown(meeting_memo_display_sidebar, unsafe_allow_html=True)
+            
+            # 모든 주차별 회의결과 요약 보기
+            st.sidebar.markdown("---")
+            st.sidebar.markdown("#### 📊 주차별 회의결과 요약")
+            meeting_summary_sidebar = {}
+            for week in sidebar_weeks:
+                week_key = f"meeting_memo_{month_label_sidebar}_{week}"
+                # 파일에서 불러오기
+                loaded_week_memo = load_memo_from_file(week_key)
+                if loaded_week_memo:
+                    meeting_summary_sidebar[week] = loaded_week_memo
+                elif week_key in st.session_state and st.session_state[week_key]:
+                    meeting_summary_sidebar[week] = st.session_state[week_key]
+            
+            if meeting_summary_sidebar:
+                for week, content in meeting_summary_sidebar.items():
+                    with st.sidebar.expander(f"📝 {week} 회의결과", expanded=False):
+                        week_display = content.replace('\n', '<br>')
+                        st.sidebar.markdown(week_display, unsafe_allow_html=True)
+            else:
+                st.sidebar.info("아직 작성된 주차별 회의결과가 없습니다.")
+        else:
+            # 주차 정보가 없으면 월별로 표시
+            meeting_memo_key_sidebar = f"meeting_memo_{month_label_sidebar}"
+            # 파일에서 메모 불러오기
+            if meeting_memo_key_sidebar not in st.session_state:
+                loaded_memo_sidebar = load_memo_from_file(meeting_memo_key_sidebar)
+                if loaded_memo_sidebar:
+                    st.session_state[meeting_memo_key_sidebar] = loaded_memo_sidebar
+                else:
+                    st.session_state[meeting_memo_key_sidebar] = ""
+            
+            # 회의결과 메모 입력
+            meeting_memo_text_sidebar = st.sidebar.text_area(
+                "회의결과 및 경영자의견을 입력하세요",
+                value=st.session_state.get(meeting_memo_key_sidebar, ""),
+                height=200,
+                placeholder="회의결과 및 경영자의견을 작성하세요. 내용은 자동으로 저장됩니다.",
+                key=f"meeting_memo_input_sidebar_{month_label_sidebar}"
+            )
+            
+            # 회의결과 메모 저장 (입력 시마다 자동 저장)
+            if meeting_memo_text_sidebar != st.session_state.get(meeting_memo_key_sidebar, ""):
+                st.session_state[meeting_memo_key_sidebar] = meeting_memo_text_sidebar
+                save_memo_to_file(meeting_memo_key_sidebar, meeting_memo_text_sidebar)
+                st.sidebar.success("✅ 회의결과가 저장되었습니다.", icon="💾")
+            
+            # 저장된 회의결과 메모 표시 (입력창과 별도로)
+            if st.session_state.get(meeting_memo_key_sidebar, ""):
+                with st.sidebar.expander("📋 저장된 회의결과 및 경영자의견 보기", expanded=False):
+                    meeting_memo_display_sidebar = st.session_state[meeting_memo_key_sidebar].replace('\n', '<br>')
+                    st.sidebar.markdown(meeting_memo_display_sidebar, unsafe_allow_html=True)
         
         if '년' in df.columns:
             years = sorted(df['년'].dropna().unique())
@@ -1454,16 +1571,24 @@ if uploaded_file is not None:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         
-        # 메모장 기능 추가
+        # 메모장 기능 추가 (파트별로 구분)
         st.markdown("---")
-        st.markdown(f"#### 📝 {month_label} 계획")
+        st.markdown(f"#### 📝 {month_label} 계획 (파트별)")
         
-        # 세션 상태 초기화 (월별로 메모 저장)
-        memo_key = f"memo_{month_label}"
-        if memo_key not in st.session_state:
-            # 12월 계획 메모 기본값 설정
-            if selected_month == 12:
-                default_memo = """★ 업무 진행 현황
+        # 파트별 메모 탭 생성
+        part_tabs = st.tabs(["1파트", "2파트"])
+        
+        # 1파트 메모
+        with part_tabs[0]:
+            memo_key_part1 = f"memo_{month_label}_part1"
+            # 파일에서 메모 불러오기
+            if memo_key_part1 not in st.session_state:
+                loaded_memo = load_memo_from_file(memo_key_part1)
+                if loaded_memo:
+                    st.session_state[memo_key_part1] = loaded_memo
+                elif selected_month == 12:
+                    # 12월 계획 메모 기본값 설정 (1파트)
+                    default_memo_part1 = """★ 업무 진행 현황
 
 * 교육 이수진행 (최승영 / 장지웅) 완료
 : 장지웅 프로는 추가로 교육필요한 인증서가 있어 추가 교육진행중
@@ -1529,31 +1654,132 @@ https://jasongroup.co.kr/
 엘슈퍼비젼
 https://elsupervision.com/default/
 """
-                st.session_state[memo_key] = default_memo
+                    st.session_state[memo_key_part1] = default_memo_part1
+                    save_memo_to_file(memo_key_part1, default_memo_part1)
+                else:
+                    st.session_state[memo_key_part1] = ""
+            
+            # 1파트 메모 입력
+            memo_text_part1 = st.text_area(
+                "1파트 메모를 입력하세요",
+                value=st.session_state.get(memo_key_part1, ""),
+                height=200,
+                placeholder="1파트 메모를 작성하세요. 내용은 자동으로 저장됩니다.",
+                key=f"memo_input_{month_label}_part1"
+            )
+            
+            # 1파트 메모 저장 (입력 시마다 자동 저장)
+            if memo_text_part1 != st.session_state.get(memo_key_part1, ""):
+                st.session_state[memo_key_part1] = memo_text_part1
+                save_memo_to_file(memo_key_part1, memo_text_part1)
+                st.success("✅ 1파트 메모가 저장되었습니다.", icon="💾")
+            
+            # 저장된 1파트 메모 표시
+            if st.session_state.get(memo_key_part1, ""):
+                with st.expander("📋 저장된 1파트 메모 보기", expanded=False):
+                    memo_display_part1 = st.session_state[memo_key_part1].replace('\n', '<br>')
+                    st.markdown(memo_display_part1, unsafe_allow_html=True)
+        
+        # 2파트 메모
+        with part_tabs[1]:
+            memo_key_part2 = f"memo_{month_label}_part2"
+            # 파일에서 메모 불러오기
+            if memo_key_part2 not in st.session_state:
+                loaded_memo = load_memo_from_file(memo_key_part2)
+                if loaded_memo:
+                    st.session_state[memo_key_part2] = loaded_memo
+                else:
+                    st.session_state[memo_key_part2] = ""
+            
+            # 2파트 메모 입력
+            memo_text_part2 = st.text_area(
+                "2파트 메모를 입력하세요",
+                value=st.session_state.get(memo_key_part2, ""),
+                height=200,
+                placeholder="2파트 메모를 작성하세요. 내용은 자동으로 저장됩니다.",
+                key=f"memo_input_{month_label}_part2"
+            )
+            
+            # 2파트 메모 저장 (입력 시마다 자동 저장)
+            if memo_text_part2 != st.session_state.get(memo_key_part2, ""):
+                st.session_state[memo_key_part2] = memo_text_part2
+                save_memo_to_file(memo_key_part2, memo_text_part2)
+                st.success("✅ 2파트 메모가 저장되었습니다.", icon="💾")
+            
+            # 저장된 2파트 메모 표시
+            if st.session_state.get(memo_key_part2, ""):
+                with st.expander("📋 저장된 2파트 메모 보기", expanded=False):
+                    memo_display_part2 = st.session_state[memo_key_part2].replace('\n', '<br>')
+                    st.markdown(memo_display_part2, unsafe_allow_html=True)
+        
+        # 주차별 경영진 회의록 추가
+        st.markdown("---")
+        st.markdown(f"#### 📋 {month_label} 주차별 경영진 회의록")
+        
+        # 주차 정보가 있는 경우
+        if '주차_한글' in df.columns:
+            # 고유한 주차 목록 가져오기
+            unique_weeks = sorted(df['주차_한글'].unique())
+            
+            if len(unique_weeks) > 0:
+                # 주차 선택
+                selected_week = st.selectbox("주차 선택", unique_weeks, key=f"week_select_{month_label}")
+                
+                # 선택된 주차의 회의록 키
+                meeting_key = f"executive_meeting_{month_label}_{selected_week}"
+                # 파일에서 회의록 불러오기
+                if meeting_key not in st.session_state:
+                    loaded_meeting = load_memo_from_file(meeting_key)
+                    if loaded_meeting:
+                        st.session_state[meeting_key] = loaded_meeting
+                    else:
+                        st.session_state[meeting_key] = ""
+                
+                # 주차별 경영진 회의록 입력
+                meeting_text = st.text_area(
+                    f"{selected_week} 경영진 회의록을 입력하세요",
+                    value=st.session_state.get(meeting_key, ""),
+                    height=200,
+                    placeholder=f"{selected_week} 경영진 회의록을 작성하세요. 내용은 자동으로 저장됩니다.",
+                    key=f"meeting_input_{month_label}_{selected_week}"
+                )
+                
+                # 회의록 저장 (입력 시마다 자동 저장)
+                if meeting_text != st.session_state.get(meeting_key, ""):
+                    st.session_state[meeting_key] = meeting_text
+                    save_memo_to_file(meeting_key, meeting_text)
+                    st.success(f"✅ {selected_week} 경영진 회의록이 저장되었습니다.", icon="💾")
+                
+                # 저장된 회의록 표시
+                if st.session_state[meeting_key]:
+                    with st.expander(f"📋 저장된 {selected_week} 경영진 회의록 보기", expanded=False):
+                        meeting_display = st.session_state[meeting_key].replace('\n', '<br>')
+                        st.markdown(meeting_display, unsafe_allow_html=True)
+                
+                # 모든 주차별 회의록 요약 보기
+                st.markdown("---")
+                st.markdown("#### 📊 주차별 회의록 요약")
+                meeting_summary = {}
+                for week in unique_weeks:
+                    week_key = f"executive_meeting_{month_label}_{week}"
+                    # 파일에서 불러오기
+                    loaded_week_meeting = load_memo_from_file(week_key)
+                    if loaded_week_meeting:
+                        meeting_summary[week] = loaded_week_meeting
+                    elif week_key in st.session_state and st.session_state[week_key]:
+                        meeting_summary[week] = st.session_state[week_key]
+                
+                if meeting_summary:
+                    for week, content in meeting_summary.items():
+                        with st.expander(f"📝 {week} 회의록", expanded=False):
+                            week_display = content.replace('\n', '<br>')
+                            st.markdown(week_display, unsafe_allow_html=True)
+                else:
+                    st.info("아직 작성된 주차별 회의록이 없습니다.")
             else:
-                st.session_state[memo_key] = ""
-        
-        # 메모 입력
-        memo_text = st.text_area(
-            "메모를 입력하세요",
-            value=st.session_state[memo_key],
-            height=200,
-            placeholder="여기에 메모를 작성하세요. 내용은 세션 동안 유지됩니다.",
-            key=f"memo_input_{month_label}"
-        )
-        
-        # 메모 저장
-        if memo_text != st.session_state[memo_key]:
-            st.session_state[memo_key] = memo_text
-        
-        # 저장된 메모 표시 (입력창과 별도로)
-        if st.session_state[memo_key]:
-            with st.expander("📋 저장된 메모 보기", expanded=False):
-                # 줄바꿈을 보존하기 위해 \n을 <br>로 변환하거나 st.text 사용
-                # st.text는 줄바꿈을 그대로 표시하지만 마크다운 형식은 지원하지 않음
-                # st.markdown은 줄바꿈을 보존하려면 \n\n이 필요하므로, \n을 <br>로 변환
-                memo_display = st.session_state[memo_key].replace('\n', '<br>')
-                st.markdown(memo_display, unsafe_allow_html=True)
+                st.info("주차 정보를 찾을 수 없습니다.")
+        else:
+            st.info("주차 정보가 없어 주차별 회의록을 작성할 수 없습니다. 날짜 정보가 포함된 데이터를 업로드해주세요.")
         
         # 판매 데이터 분석 섹션 추가 (선택된 월 상세 데이터 하단) - 숨김
         if False and os.path.exists(sales_data_path):
