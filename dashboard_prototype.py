@@ -405,6 +405,17 @@ if uploaded_file is not None:
         st.sidebar.markdown("---")
         st.sidebar.markdown(f"#### 📝 {month_label_sidebar} 회의결과 및 경영자의견")
         
+        # 주차를 올바른 순서로 정렬하는 함수
+        def sort_weeks_korean_sidebar(weeks):
+            """주차를 첫째주, 둘째주, 셋째주, 넷째주 순서로 정렬"""
+            week_order = {'첫째': 1, '둘째': 2, '셋째': 3, '넷째': 4, '다섯째': 5}
+            def get_week_number(week_str):
+                for key, value in week_order.items():
+                    if key in week_str:
+                        return value
+                return 999  # 알 수 없는 주차는 마지막에
+            return sorted(weeks, key=get_week_number)
+        
         # 주차 정보 계산 (사이드바에서 사용하기 위해)
         sidebar_weeks = []
         if len(date_columns) > 0:
@@ -425,26 +436,39 @@ if uploaded_file is not None:
                 return f"{month_label} {week_num}주"
             
             df_temp['주차_한글'] = df_temp['주차'].apply(lambda x: week_to_korean_sidebar(x, min_week, selected_month))
-            sidebar_weeks = sorted(df_temp['주차_한글'].unique())
+            sidebar_weeks = sort_weeks_korean_sidebar(df_temp['주차_한글'].unique().tolist())
         
         # 주차별 회의결과 및 경영자의견
         if len(sidebar_weeks) > 0:
-            # 주차 선택
+            # 공통 주차 선택 키 (사이드바와 메인 페이지 동기화)
+            shared_week_key = f"shared_week_select_{month_label_sidebar}"
+            
+            # 주차 선택 (사이드바와 메인 페이지 동기화)
+            # 메인 페이지에서 선택한 주차가 있으면 그것을 사용, 없으면 첫 번째 주차
+            if shared_week_key in st.session_state and st.session_state[shared_week_key] in sidebar_weeks:
+                default_index = sidebar_weeks.index(st.session_state[shared_week_key])
+            else:
+                default_index = 0
+            
             selected_week_sidebar = st.sidebar.selectbox(
                 "주차 선택", 
                 sidebar_weeks, 
-                key=f"week_select_sidebar_{month_label_sidebar}"
+                key=shared_week_key,
+                index=default_index
             )
+            # st.selectbox는 key를 사용하면 자동으로 session_state에 저장되므로 수동 설정 불필요
             
             # 선택된 주차의 회의결과 메모 키
             meeting_memo_key_sidebar = f"meeting_memo_{month_label_sidebar}_{selected_week_sidebar}"
-            # 파일에서 메모 불러오기
-            if meeting_memo_key_sidebar not in st.session_state:
+            
+            # 주차별로 독립적인 session_state 키 사용 (주차가 변경되면 항상 파일에서 불러오기)
+            current_week_state_key_sidebar = f"current_week_sidebar_{meeting_memo_key_sidebar}"
+            if current_week_state_key_sidebar not in st.session_state or st.session_state.get(f"last_selected_week_sidebar_{month_label_sidebar}") != selected_week_sidebar:
+                # 주차가 변경되었거나 처음 로드하는 경우 파일에서 불러오기
                 loaded_memo_sidebar = load_memo_from_file(meeting_memo_key_sidebar)
-                if loaded_memo_sidebar:
-                    st.session_state[meeting_memo_key_sidebar] = loaded_memo_sidebar
-                else:
-                    st.session_state[meeting_memo_key_sidebar] = ""
+                st.session_state[meeting_memo_key_sidebar] = loaded_memo_sidebar if loaded_memo_sidebar else ""
+                st.session_state[current_week_state_key_sidebar] = True
+                st.session_state[f"last_selected_week_sidebar_{month_label_sidebar}"] = selected_week_sidebar
             
             # 회의결과 메모 입력
             meeting_memo_text_sidebar = st.sidebar.text_area(
@@ -481,12 +505,39 @@ if uploaded_file is not None:
                     meeting_summary_sidebar[week] = st.session_state[week_key]
             
             if meeting_summary_sidebar:
-                for week, content in meeting_summary_sidebar.items():
-                    with st.sidebar.expander(f"📝 {week} 회의결과", expanded=False):
-                        week_display = content.replace('\n', '<br>')
-                        st.sidebar.markdown(week_display, unsafe_allow_html=True)
+                # 정렬된 주차 순서로 표시
+                for week in sidebar_weeks:
+                    if week in meeting_summary_sidebar:
+                        content = meeting_summary_sidebar[week]
+                        with st.sidebar.expander(f"📝 {week} 회의결과", expanded=False):
+                            week_display = content.replace('\n', '<br>')
+                            st.sidebar.markdown(week_display, unsafe_allow_html=True)
             else:
                 st.sidebar.info("아직 작성된 주차별 회의결과가 없습니다.")
+            
+            # 주차별 경영진 회의록 요약 추가
+            st.sidebar.markdown("---")
+            st.sidebar.markdown("#### 📋 주차별 경영진 회의록 요약")
+            executive_meeting_summary = {}
+            for week in sidebar_weeks:
+                week_key = f"executive_meeting_{month_label_sidebar}_{week}"
+                # 파일에서 불러오기
+                loaded_executive_meeting = load_memo_from_file(week_key)
+                if loaded_executive_meeting:
+                    executive_meeting_summary[week] = loaded_executive_meeting
+            
+            if executive_meeting_summary:
+                # 정렬된 주차 순서로 표시
+                for week in sidebar_weeks:
+                    if week in executive_meeting_summary:
+                        content = executive_meeting_summary[week]
+                        # 내용 요약 (첫 100자만 표시)
+                        summary = content[:100] + "..." if len(content) > 100 else content
+                        with st.sidebar.expander(f"📋 {week} 경영진 회의록", expanded=False):
+                            week_display = content.replace('\n', '<br>')
+                            st.sidebar.markdown(week_display, unsafe_allow_html=True)
+            else:
+                st.sidebar.info("아직 작성된 주차별 경영진 회의록이 없습니다.")
         else:
             # 주차 정보가 없으면 월별로 표시
             meeting_memo_key_sidebar = f"meeting_memo_{month_label_sidebar}"
@@ -1716,24 +1767,47 @@ https://elsupervision.com/default/
         st.markdown("---")
         st.markdown(f"#### 📋 {month_label} 주차별 경영진 회의록")
         
+        # 주차를 올바른 순서로 정렬하는 함수
+        def sort_weeks_korean(weeks):
+            """주차를 첫째주, 둘째주, 셋째주, 넷째주 순서로 정렬"""
+            week_order = {'첫째': 1, '둘째': 2, '셋째': 3, '넷째': 4, '다섯째': 5}
+            def get_week_number(week_str):
+                for key, value in week_order.items():
+                    if key in week_str:
+                        return value
+                return 999  # 알 수 없는 주차는 마지막에
+            return sorted(weeks, key=get_week_number)
+        
         # 주차 정보가 있는 경우
         if '주차_한글' in df.columns:
-            # 고유한 주차 목록 가져오기
-            unique_weeks = sorted(df['주차_한글'].unique())
+            # 고유한 주차 목록 가져오기 (올바른 순서로 정렬)
+            unique_weeks = sort_weeks_korean(df['주차_한글'].unique().tolist())
             
             if len(unique_weeks) > 0:
-                # 주차 선택
-                selected_week = st.selectbox("주차 선택", unique_weeks, key=f"week_select_{month_label}")
+                # 공통 주차 선택 키 (사이드바와 메인 페이지 동기화)
+                shared_week_key = f"shared_week_select_{month_label}"
+                
+                # 주차 선택 (사이드바와 메인 페이지 동기화)
+                # 사이드바에서 선택한 주차가 있으면 그것을 사용, 없으면 첫 번째 주차
+                if shared_week_key in st.session_state and st.session_state[shared_week_key] in unique_weeks:
+                    default_index = unique_weeks.index(st.session_state[shared_week_key])
+                else:
+                    default_index = 0
+                
+                selected_week = st.selectbox("주차 선택", unique_weeks, key=shared_week_key, index=default_index)
+                # st.selectbox는 key를 사용하면 자동으로 session_state에 저장되므로 수동 설정 불필요
                 
                 # 선택된 주차의 회의록 키
                 meeting_key = f"executive_meeting_{month_label}_{selected_week}"
-                # 파일에서 회의록 불러오기
-                if meeting_key not in st.session_state:
+                
+                # 주차별로 독립적인 session_state 키 사용 (주차가 변경되면 항상 파일에서 불러오기)
+                current_week_state_key = f"current_week_{meeting_key}"
+                if current_week_state_key not in st.session_state or st.session_state.get(f"last_selected_week_{month_label}") != selected_week:
+                    # 주차가 변경되었거나 처음 로드하는 경우 파일에서 불러오기
                     loaded_meeting = load_memo_from_file(meeting_key)
-                    if loaded_meeting:
-                        st.session_state[meeting_key] = loaded_meeting
-                    else:
-                        st.session_state[meeting_key] = ""
+                    st.session_state[meeting_key] = loaded_meeting if loaded_meeting else ""
+                    st.session_state[current_week_state_key] = True
+                    st.session_state[f"last_selected_week_{month_label}"] = selected_week
                 
                 # 주차별 경영진 회의록 입력
                 meeting_text = st.text_area(
@@ -1769,11 +1843,35 @@ https://elsupervision.com/default/
                     elif week_key in st.session_state and st.session_state[week_key]:
                         meeting_summary[week] = st.session_state[week_key]
                 
+                # 선택된 주차를 추적하여 주차 변경 시 자동으로 열리도록 함
+                summary_selected_week_key = f"summary_selected_week_{month_label}"
+                if summary_selected_week_key not in st.session_state:
+                    st.session_state[summary_selected_week_key] = selected_week
+                
+                # 주차가 변경되었는지 확인
+                week_changed = st.session_state[summary_selected_week_key] != selected_week
+                if week_changed:
+                    st.session_state[summary_selected_week_key] = selected_week
+                
                 if meeting_summary:
-                    for week, content in meeting_summary.items():
-                        with st.expander(f"📝 {week} 회의록", expanded=False):
+                    # 선택된 주차의 회의록을 먼저 표시하고 자동으로 열기
+                    # 주차가 변경되었거나 처음 로드하는 경우 expanded=True
+                    if selected_week in meeting_summary:
+                        content = meeting_summary[selected_week]
+                        # 선택된 주차는 항상 expanded=True (주차 변경 시 자동으로 열림)
+                        with st.expander(f"📝 {selected_week} 회의록", expanded=True):
                             week_display = content.replace('\n', '<br>')
                             st.markdown(week_display, unsafe_allow_html=True)
+                    
+                    # 나머지 주차의 회의록 표시 (선택된 주차 제외)
+                    # 정렬된 순서로 표시하되, 선택된 주차는 제외
+                    for week in unique_weeks:
+                        if week in meeting_summary and week != selected_week:
+                            content = meeting_summary[week]
+                            # 선택되지 않은 주차는 expanded=False
+                            with st.expander(f"📝 {week} 회의록", expanded=False):
+                                week_display = content.replace('\n', '<br>')
+                                st.markdown(week_display, unsafe_allow_html=True)
                 else:
                     st.info("아직 작성된 주차별 회의록이 없습니다.")
             else:
