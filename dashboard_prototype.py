@@ -440,23 +440,28 @@ if uploaded_file is not None:
         
         # 주차별 회의결과 및 경영자의견
         if len(sidebar_weeks) > 0:
-            # 공통 주차 선택 키 (사이드바와 메인 페이지 동기화)
-            shared_week_key = f"shared_week_select_{month_label_sidebar}"
+            # 사이드바와 메인 페이지 동기화를 위한 키 (selected_month를 직접 사용)
+            month_key = f"{selected_month}월" if selected_month is not None else "월"
+            sidebar_week_select_key = f"week_select_sidebar_{month_key}"
+            main_week_select_key = f"week_select_main_{month_key}"
             
             # 주차 선택 (사이드바와 메인 페이지 동기화)
             # 메인 페이지에서 선택한 주차가 있으면 그것을 사용, 없으면 첫 번째 주차
-            if shared_week_key in st.session_state and st.session_state[shared_week_key] in sidebar_weeks:
-                default_index = sidebar_weeks.index(st.session_state[shared_week_key])
+            if main_week_select_key in st.session_state and st.session_state[main_week_select_key] in sidebar_weeks:
+                # 메인 페이지에서 선택한 주차 사용
+                default_index = sidebar_weeks.index(st.session_state[main_week_select_key])
+            elif sidebar_week_select_key in st.session_state and st.session_state[sidebar_week_select_key] in sidebar_weeks:
+                # 사이드바에서 이전에 선택한 주차 사용
+                default_index = sidebar_weeks.index(st.session_state[sidebar_week_select_key])
             else:
                 default_index = 0
             
             selected_week_sidebar = st.sidebar.selectbox(
                 "주차 선택", 
                 sidebar_weeks, 
-                key=shared_week_key,
+                key=sidebar_week_select_key,
                 index=default_index
             )
-            # st.selectbox는 key를 사용하면 자동으로 session_state에 저장되므로 수동 설정 불필요
             
             # 선택된 주차의 회의결과 메모 키
             meeting_memo_key_sidebar = f"meeting_memo_{month_label_sidebar}_{selected_week_sidebar}"
@@ -1784,18 +1789,23 @@ https://elsupervision.com/default/
             unique_weeks = sort_weeks_korean(df['주차_한글'].unique().tolist())
             
             if len(unique_weeks) > 0:
-                # 공통 주차 선택 키 (사이드바와 메인 페이지 동기화)
-                shared_week_key = f"shared_week_select_{month_label}"
+                # 사이드바와 메인 페이지 동기화를 위한 키 (selected_month를 직접 사용)
+                month_key = f"{selected_month}월" if selected_month is not None else "월"
+                sidebar_week_select_key = f"week_select_sidebar_{month_key}"
+                main_week_select_key = f"week_select_main_{month_key}"
                 
                 # 주차 선택 (사이드바와 메인 페이지 동기화)
                 # 사이드바에서 선택한 주차가 있으면 그것을 사용, 없으면 첫 번째 주차
-                if shared_week_key in st.session_state and st.session_state[shared_week_key] in unique_weeks:
-                    default_index = unique_weeks.index(st.session_state[shared_week_key])
+                if sidebar_week_select_key in st.session_state and st.session_state[sidebar_week_select_key] in unique_weeks:
+                    # 사이드바에서 선택한 주차 사용 (우선순위)
+                    default_index = unique_weeks.index(st.session_state[sidebar_week_select_key])
+                elif main_week_select_key in st.session_state and st.session_state[main_week_select_key] in unique_weeks:
+                    # 메인 페이지에서 이전에 선택한 주차 사용
+                    default_index = unique_weeks.index(st.session_state[main_week_select_key])
                 else:
                     default_index = 0
                 
-                selected_week = st.selectbox("주차 선택", unique_weeks, key=shared_week_key, index=default_index)
-                # st.selectbox는 key를 사용하면 자동으로 session_state에 저장되므로 수동 설정 불필요
+                selected_week = st.selectbox("주차 선택", unique_weeks, key=main_week_select_key, index=default_index)
                 
                 # 선택된 주차의 회의록 키
                 meeting_key = f"executive_meeting_{month_label}_{selected_week}"
