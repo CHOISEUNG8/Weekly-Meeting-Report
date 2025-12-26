@@ -442,8 +442,8 @@ if uploaded_file is not None:
         if len(sidebar_weeks) > 0:
             # 사이드바와 메인 페이지 동기화를 위한 키 (selected_month를 직접 사용)
             month_key = f"{selected_month}월" if selected_month is not None else "월"
-            sidebar_week_select_key = f"week_select_sidebar_{month_key}"
-            main_week_select_key = f"week_select_main_{month_key}"
+            sidebar_week_select_key = f"sidebar_week_select_{month_key}"
+            main_week_select_key = f"main_week_select_{month_key}"
             
             # 주차 선택 (사이드바와 메인 페이지 동기화)
             # 메인 페이지에서 선택한 주차가 있으면 그것을 사용, 없으면 첫 번째 주차
@@ -1791,8 +1791,8 @@ https://elsupervision.com/default/
             if len(unique_weeks) > 0:
                 # 사이드바와 메인 페이지 동기화를 위한 키 (selected_month를 직접 사용)
                 month_key = f"{selected_month}월" if selected_month is not None else "월"
-                sidebar_week_select_key = f"week_select_sidebar_{month_key}"
-                main_week_select_key = f"week_select_main_{month_key}"
+                sidebar_week_select_key = f"sidebar_week_select_{month_key}"
+                main_week_select_key = f"main_week_select_{month_key}"
                 
                 # 주차 선택 (사이드바와 메인 페이지 동기화)
                 # 사이드바에서 선택한 주차가 있으면 그것을 사용, 없으면 첫 번째 주차
