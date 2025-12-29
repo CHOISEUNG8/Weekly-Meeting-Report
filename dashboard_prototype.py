@@ -11,6 +11,7 @@ from datetime import datetime
 import openpyxl
 import json
 import os
+import html
 
 # 페이지 설정
 st.set_page_config(
@@ -28,9 +29,10 @@ if not os.path.exists(MEMO_DATA_DIR):
     os.makedirs(MEMO_DATA_DIR)
 
 def save_memo_to_file(key, value):
-    """메모를 JSON 파일로 저장"""
+    """메모를 JSON 파일로 저장 (원본 포맷 보존)"""
     try:
         file_path = os.path.join(MEMO_DATA_DIR, f"{key}.json")
+        # 원본 텍스트 포맷을 완벽하게 보존하기 위해 ensure_ascii=False 사용
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump({"content": value}, f, ensure_ascii=False, indent=2)
     except Exception as e:
@@ -526,10 +528,16 @@ if uploaded_file is not None:
             executive_meeting_summary = {}
             for week in sidebar_weeks:
                 week_key = f"executive_meeting_{month_label_sidebar}_{week}"
-                # 파일에서 불러오기
-                loaded_executive_meeting = load_memo_from_file(week_key)
-                if loaded_executive_meeting:
-                    executive_meeting_summary[week] = loaded_executive_meeting
+                # session_state에 있으면 우선 사용 (최신 데이터), 없으면 파일에서 불러오기
+                if week_key in st.session_state and st.session_state[week_key]:
+                    executive_meeting_summary[week] = st.session_state[week_key]
+                else:
+                    # 파일에서 불러오기
+                    loaded_executive_meeting = load_memo_from_file(week_key)
+                    if loaded_executive_meeting:
+                        executive_meeting_summary[week] = loaded_executive_meeting
+                        # session_state에도 저장하여 다음에 빠르게 접근
+                        st.session_state[week_key] = loaded_executive_meeting
             
             if executive_meeting_summary:
                 # 정렬된 주차 순서로 표시
@@ -1627,24 +1635,62 @@ if uploaded_file is not None:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
         
-        # 메모장 기능 추가 (파트별로 구분)
+        # 메모장 기능 추가 (파트별로 구분, 주차별 저장)
         st.markdown("---")
         st.markdown(f"#### 📝 {month_label} 계획 (파트별)")
         
-        # 파트별 메모 탭 생성
-        part_tabs = st.tabs(["1파트", "2파트"])
+        # 주차를 올바른 순서로 정렬하는 함수
+        def sort_weeks_korean_for_part(weeks):
+            """주차를 첫째주, 둘째주, 셋째주, 넷째주 순서로 정렬"""
+            week_order = {'첫째': 1, '둘째': 2, '셋째': 3, '넷째': 4, '다섯째': 5}
+            def get_week_number(week_str):
+                for key, value in week_order.items():
+                    if key in week_str:
+                        return value
+                return 999  # 알 수 없는 주차는 마지막에
+            return sorted(weeks, key=get_week_number)
         
-        # 1파트 메모
-        with part_tabs[0]:
-            memo_key_part1 = f"memo_{month_label}_part1"
-            # 파일에서 메모 불러오기
-            if memo_key_part1 not in st.session_state:
-                loaded_memo = load_memo_from_file(memo_key_part1)
-                if loaded_memo:
-                    st.session_state[memo_key_part1] = loaded_memo
-                elif selected_month == 12:
-                    # 12월 계획 메모 기본값 설정 (1파트)
-                    default_memo_part1 = """★ 업무 진행 현황
+        # 주차 정보가 있는 경우 주차별로 저장
+        if '주차_한글' in df.columns:
+            # 고유한 주차 목록 가져오기 (올바른 순서로 정렬)
+            unique_weeks = sort_weeks_korean_for_part(df['주차_한글'].unique().tolist())
+            
+            if len(unique_weeks) > 0:
+                # 사이드바와 메인 페이지 동기화를 위한 키 (selected_month를 직접 사용)
+                month_key = f"{selected_month}월" if selected_month is not None else "월"
+                sidebar_week_select_key = f"sidebar_week_select_{month_key}"
+                part_week_select_key = f"part_week_select_{month_key}"
+                
+                # 주차 선택 (사이드바와 메인 페이지 동기화)
+                # 사이드바에서 선택한 주차가 있으면 그것을 사용, 없으면 첫 번째 주차
+                if sidebar_week_select_key in st.session_state and st.session_state[sidebar_week_select_key] in unique_weeks:
+                    # 사이드바에서 선택한 주차 사용 (우선순위)
+                    default_index = unique_weeks.index(st.session_state[sidebar_week_select_key])
+                elif part_week_select_key in st.session_state and st.session_state[part_week_select_key] in unique_weeks:
+                    # 파트 메모에서 이전에 선택한 주차 사용
+                    default_index = unique_weeks.index(st.session_state[part_week_select_key])
+                else:
+                    default_index = 0
+                
+                selected_week_part = st.selectbox("주차 선택", unique_weeks, key=part_week_select_key, index=default_index)
+                
+                # 파트별 메모 탭 생성
+                part_tabs = st.tabs(["1파트", "2파트"])
+                
+                # 1파트 메모
+                with part_tabs[0]:
+                    memo_key_part1 = f"memo_{month_label}_{selected_week_part}_part1"
+                    
+                    # 주차별로 독립적인 session_state 키 사용 (주차가 변경되면 항상 파일에서 불러오기)
+                    current_week_state_key_part1 = f"current_week_{memo_key_part1}"
+                    if current_week_state_key_part1 not in st.session_state or st.session_state.get(f"last_selected_week_part_{month_label}") != selected_week_part:
+                        # 주차가 변경되었거나 처음 로드하는 경우 파일에서 불러오기
+                        loaded_memo = load_memo_from_file(memo_key_part1)
+                        if loaded_memo:
+                            st.session_state[memo_key_part1] = loaded_memo
+                        elif selected_month == 12 and selected_week_part == unique_weeks[0]:
+                            # 12월 첫째주 계획 메모 기본값 설정 (1파트)
+                            default_memo_part1 = """★ 업무 진행 현황
 
 * 교육 이수진행 (최승영 / 장지웅) 완료
 : 장지웅 프로는 추가로 교육필요한 인증서가 있어 추가 교육진행중
@@ -1692,7 +1738,7 @@ if uploaded_file is not None:
 
 * 한화 복지몰 마사지기 상품 제안 
 : 누가의료기 선정하여 요청 하였고,
- 금액 확인 후 상품 제안 예정
+금액 확인 후 상품 제안 예정
 
 * 올웨이지 미팅 요청
 : 판매 활성화를 위해 미팅 요청 진행
@@ -1710,63 +1756,231 @@ https://jasongroup.co.kr/
 엘슈퍼비젼
 https://elsupervision.com/default/
 """
-                    st.session_state[memo_key_part1] = default_memo_part1
-                    save_memo_to_file(memo_key_part1, default_memo_part1)
-                else:
-                    st.session_state[memo_key_part1] = ""
+                            st.session_state[memo_key_part1] = default_memo_part1
+                            save_memo_to_file(memo_key_part1, default_memo_part1)
+                        else:
+                            st.session_state[memo_key_part1] = ""
+                        st.session_state[current_week_state_key_part1] = True
+                        st.session_state[f"last_selected_week_part_{month_label}"] = selected_week_part
+                    
+                    # 1파트 메모 입력
+                    memo_text_part1 = st.text_area(
+                        f"1파트 메모를 입력하세요 ({selected_week_part})",
+                        value=st.session_state.get(memo_key_part1, ""),
+                        height=150,
+                        placeholder=f"1파트 메모를 작성하세요 ({selected_week_part}). 내용은 자동으로 저장됩니다.\n\n💡 팁: 들여쓰기와 줄바꿈이 그대로 보존됩니다.",
+                        key=f"memo_input_{month_label}_{selected_week_part}_part1"
+                    )
+                    
+                    # 1파트 메모 저장 (입력 시마다 자동 저장)
+                    if memo_text_part1 != st.session_state.get(memo_key_part1, ""):
+                        st.session_state[memo_key_part1] = memo_text_part1
+                        save_memo_to_file(memo_key_part1, memo_text_part1)
+                        st.success(f"✅ {selected_week_part} 1파트 메모가 저장되었습니다.", icon="💾")
+                    
+                    # 저장된 1파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
+                    if st.session_state.get(memo_key_part1, ""):
+                        with st.expander(f"📋 저장된 {selected_week_part} 1파트 메모 보기", expanded=False):
+                            # 입력 영역과 동일한 스타일로 표시 (일반 폰트, 줄바꿈 보존)
+                            memo_content = html.escape(st.session_state[memo_key_part1])
+                            # 줄바꿈을 <br>로 변환
+                            memo_content = memo_content.replace('\n', '<br>')
+                            # 입력 영역과 동일한 스타일 적용
+                            memo_display_part1 = f"<div style='white-space: pre-wrap; font-family: inherit; line-height: 1.5; padding: 0.5rem;'>{memo_content}</div>"
+                            st.markdown(memo_display_part1, unsafe_allow_html=True)
+                
+                # 2파트 메모
+                with part_tabs[1]:
+                    memo_key_part2 = f"memo_{month_label}_{selected_week_part}_part2"
+                    
+                    # 주차별로 독립적인 session_state 키 사용 (주차가 변경되면 항상 파일에서 불러오기)
+                    current_week_state_key_part2 = f"current_week_{memo_key_part2}"
+                    if current_week_state_key_part2 not in st.session_state or st.session_state.get(f"last_selected_week_part_{month_label}") != selected_week_part:
+                        # 주차가 변경되었거나 처음 로드하는 경우 파일에서 불러오기
+                        loaded_memo = load_memo_from_file(memo_key_part2)
+                        if loaded_memo:
+                            st.session_state[memo_key_part2] = loaded_memo
+                        else:
+                            st.session_state[memo_key_part2] = ""
+                        st.session_state[current_week_state_key_part2] = True
+                    
+                    # 2파트 메모 입력
+                    memo_text_part2 = st.text_area(
+                        f"2파트 메모를 입력하세요 ({selected_week_part})",
+                        value=st.session_state.get(memo_key_part2, ""),
+                        height=150,
+                        placeholder=f"2파트 메모를 작성하세요 ({selected_week_part}). 내용은 자동으로 저장됩니다.\n\n💡 팁: 들여쓰기와 줄바꿈이 그대로 보존됩니다.",
+                        key=f"memo_input_{month_label}_{selected_week_part}_part2"
+                    )
+                    
+                    # 2파트 메모 저장 (입력 시마다 자동 저장)
+                    if memo_text_part2 != st.session_state.get(memo_key_part2, ""):
+                        st.session_state[memo_key_part2] = memo_text_part2
+                        save_memo_to_file(memo_key_part2, memo_text_part2)
+                        st.success(f"✅ {selected_week_part} 2파트 메모가 저장되었습니다.", icon="💾")
+                    
+                    # 저장된 2파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
+                    if st.session_state.get(memo_key_part2, ""):
+                        with st.expander(f"📋 저장된 {selected_week_part} 2파트 메모 보기", expanded=False):
+                            # 입력 영역과 동일한 스타일로 표시 (일반 폰트, 줄바꿈 보존)
+                            memo_content = html.escape(st.session_state[memo_key_part2])
+                            # 줄바꿈을 <br>로 변환
+                            memo_content = memo_content.replace('\n', '<br>')
+                            # 입력 영역과 동일한 스타일 적용
+                            memo_display_part2 = f"<div style='white-space: pre-wrap; font-family: inherit; line-height: 1.5; padding: 0.5rem;'>{memo_content}</div>"
+                            st.markdown(memo_display_part2, unsafe_allow_html=True)
+            else:
+                st.info("주차 정보를 찾을 수 없습니다.")
+        else:
+            # 주차 정보가 없는 경우 기존 방식으로 월별 저장 (하위 호환성 유지)
+            st.info("⚠️ 주차 정보가 없어 월별로 저장됩니다. 날짜 정보가 포함된 데이터를 업로드하면 주차별로 저장됩니다.")
             
-            # 1파트 메모 입력
-            memo_text_part1 = st.text_area(
-                "1파트 메모를 입력하세요",
-                value=st.session_state.get(memo_key_part1, ""),
-                height=200,
-                placeholder="1파트 메모를 작성하세요. 내용은 자동으로 저장됩니다.",
-                key=f"memo_input_{month_label}_part1"
-            )
+            # 파트별 메모 탭 생성
+            part_tabs = st.tabs(["1파트", "2파트"])
             
-            # 1파트 메모 저장 (입력 시마다 자동 저장)
-            if memo_text_part1 != st.session_state.get(memo_key_part1, ""):
-                st.session_state[memo_key_part1] = memo_text_part1
-                save_memo_to_file(memo_key_part1, memo_text_part1)
-                st.success("✅ 1파트 메모가 저장되었습니다.", icon="💾")
+            # 1파트 메모
+            with part_tabs[0]:
+                memo_key_part1 = f"memo_{month_label}_part1"
+                # 파일에서 메모 불러오기
+                if memo_key_part1 not in st.session_state:
+                    loaded_memo = load_memo_from_file(memo_key_part1)
+                    if loaded_memo:
+                        st.session_state[memo_key_part1] = loaded_memo
+                    elif selected_month == 12:
+                        # 12월 계획 메모 기본값 설정 (1파트)
+                        default_memo_part1 = """★ 업무 진행 현황
+
+* 교육 이수진행 (최승영 / 장지웅) 완료
+: 장지웅 프로는 추가로 교육필요한 인증서가 있어 추가 교육진행중
+
+* 메가존 제안서 승인완료 상품 등록 (오가닉K + 2)
+
+* 애터미 특가구좌 진행
+: 미고가 제품 진행 (월 화 수) - 1+1 귀걸이 목걸이 쥬얼리 2세트
+: 에스씨컴퍼니 떡 + 미고가 정수리가발 (목) 진행
+: 소노스퀘어 이불 셋트 (토) 진행
+: 미고가 쥬얼리세트 2종 (일요일) 진행
+
+*이제너두 운영관련 MD와 협의
+: 상품 등록수 늘리기 (E-카탈로그형식으로 상시제품보다가 특판 문의 들어올수 있음)
+: 공지사항에 기재되는 특판 및 행사건 최대한 저렴하게 진행 요청
+: 공지사항 행사건 처리 잘해주면 그다음 특판제안 관련 받을수 있을수 있음
+: 상시매출도 높아야 특판 기회 가능성 있음
+: 기존에 특판기업들이 있기때문에 그 기업들보다 저렴하게 진행해야 추후 진행가능
+  (너무많은 제안서가 들어오기떄문에 기존 특판기업에 의존도 95%) 
+
+*전문 특판업체 필요성
+: 특판의 경우 전문적으로 진행하는 회사들이 존재하여 상품 의뢰할 기업 찾기
+: 자체적으로 진행하기에는 특판구조에 맞지않는 제품들이 대다수 (상위 브랜드 제품의 보유사항)
+: 특판이 존재하는 폐쇄몰 기준 특판 진행할수 있는 매출 및 상품수 확보할때까지만 의뢰 예정
+
+*신규제품 상품 관련 정리
+: 맥널티 일농 / 디에스엠 (최저가 안맞아서 제안서 다시 요청)
+: 소셜빈은 제품 상세페이지 부터 진행되어야 함
+  (제품 300개 정도 - 정상가 대비 75%공급가 : 최저가는 따로 조사 예정)
+: 닥터엠 생수의경우 복지몰의 중복코드가 있어서 정리 요청 및 단가 인하 요청
+: 순창성가정식품 많은제품 모두 제안 요청
+   고추장 된장 등 면세제품 과세제품으로 1월1일부터 변경예정이어서 
+   해당제품들 모두 상품 내리고 다시 올려야함
+: 위랩 신규제품 제안 요청 진행 / 최저가에 맞추어 가격설정 요청
+
+---------------------------------------------------------------------------------------------------------------------------------
+
+* 설 명절 제안서 관련 이슈
+: 자체 가상 취합일정 - 12/19
+: 실제 삼성 취합일정 - 12/17 오전 11시까지
+: 다시 일정관련하여 메일 재발송 진행 - 중요업체는 유선으로 재촉 진행
+
+* 애터미 추가 특가 상품 제안예정
+: 쿠첸 밥솥 특가 예정 + 업체 특가 요청 진행
+
+* 한화 복지몰 마사지기 상품 제안 
+: 누가의료기 선정하여 요청 하였고,
+금액 확인 후 상품 제안 예정
+
+* 올웨이지 미팅 요청
+: 판매 활성화를 위해 미팅 요청 진행
+: 메일로 주요 상품군 전달 진행
+
+* PNS로지스틱스 (말레이시아 물류파트너)
+ : 간략하게 스마트공장 리스트 및 진행제품 카테고리 정리해서 
+   신동인 팀장에게 공유 진행
+
+*홈페이지 관련 모니터링
+비즈마켓
+https://www.bizmarket.com/
+제이슨그룹
+https://jasongroup.co.kr/
+엘슈퍼비젼
+https://elsupervision.com/default/
+"""
+                        st.session_state[memo_key_part1] = default_memo_part1
+                        save_memo_to_file(memo_key_part1, default_memo_part1)
+                    else:
+                        st.session_state[memo_key_part1] = ""
+                
+                # 1파트 메모 입력
+                memo_text_part1 = st.text_area(
+                    "1파트 메모를 입력하세요",
+                    value=st.session_state.get(memo_key_part1, ""),
+                    height=150,
+                    placeholder="1파트 메모를 작성하세요. 내용은 자동으로 저장됩니다.\n\n💡 팁: 들여쓰기와 줄바꿈이 그대로 보존됩니다.",
+                    key=f"memo_input_{month_label}_part1"
+                )
+                
+                # 1파트 메모 저장 (입력 시마다 자동 저장)
+                if memo_text_part1 != st.session_state.get(memo_key_part1, ""):
+                    st.session_state[memo_key_part1] = memo_text_part1
+                    save_memo_to_file(memo_key_part1, memo_text_part1)
+                    st.success("✅ 1파트 메모가 저장되었습니다.", icon="💾")
+                
+                # 저장된 1파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
+                if st.session_state.get(memo_key_part1, ""):
+                    with st.expander("📋 저장된 1파트 메모 보기", expanded=False):
+                        # 입력 영역과 동일한 스타일로 표시 (일반 폰트, 줄바꿈 보존)
+                        memo_content = html.escape(st.session_state[memo_key_part1])
+                        # 줄바꿈을 <br>로 변환
+                        memo_content = memo_content.replace('\n', '<br>')
+                        # 입력 영역과 동일한 스타일 적용
+                        memo_display_part1 = f"<div style='white-space: pre-wrap; font-family: inherit; line-height: 1.5; padding: 0.5rem;'>{memo_content}</div>"
+                        st.markdown(memo_display_part1, unsafe_allow_html=True)
             
-            # 저장된 1파트 메모 표시
-            if st.session_state.get(memo_key_part1, ""):
-                with st.expander("📋 저장된 1파트 메모 보기", expanded=False):
-                    memo_display_part1 = st.session_state[memo_key_part1].replace('\n', '<br>')
-                    st.markdown(memo_display_part1, unsafe_allow_html=True)
-        
-        # 2파트 메모
-        with part_tabs[1]:
-            memo_key_part2 = f"memo_{month_label}_part2"
-            # 파일에서 메모 불러오기
-            if memo_key_part2 not in st.session_state:
-                loaded_memo = load_memo_from_file(memo_key_part2)
-                if loaded_memo:
-                    st.session_state[memo_key_part2] = loaded_memo
-                else:
-                    st.session_state[memo_key_part2] = ""
-            
-            # 2파트 메모 입력
-            memo_text_part2 = st.text_area(
-                "2파트 메모를 입력하세요",
-                value=st.session_state.get(memo_key_part2, ""),
-                height=200,
-                placeholder="2파트 메모를 작성하세요. 내용은 자동으로 저장됩니다.",
-                key=f"memo_input_{month_label}_part2"
-            )
-            
-            # 2파트 메모 저장 (입력 시마다 자동 저장)
-            if memo_text_part2 != st.session_state.get(memo_key_part2, ""):
-                st.session_state[memo_key_part2] = memo_text_part2
-                save_memo_to_file(memo_key_part2, memo_text_part2)
-                st.success("✅ 2파트 메모가 저장되었습니다.", icon="💾")
-            
-            # 저장된 2파트 메모 표시
-            if st.session_state.get(memo_key_part2, ""):
-                with st.expander("📋 저장된 2파트 메모 보기", expanded=False):
-                    memo_display_part2 = st.session_state[memo_key_part2].replace('\n', '<br>')
-                    st.markdown(memo_display_part2, unsafe_allow_html=True)
+            # 2파트 메모
+            with part_tabs[1]:
+                memo_key_part2 = f"memo_{month_label}_part2"
+                # 파일에서 메모 불러오기
+                if memo_key_part2 not in st.session_state:
+                    loaded_memo = load_memo_from_file(memo_key_part2)
+                    if loaded_memo:
+                        st.session_state[memo_key_part2] = loaded_memo
+                    else:
+                        st.session_state[memo_key_part2] = ""
+                
+                # 2파트 메모 입력
+                memo_text_part2 = st.text_area(
+                    "2파트 메모를 입력하세요",
+                    value=st.session_state.get(memo_key_part2, ""),
+                    height=150,
+                    placeholder="2파트 메모를 작성하세요. 내용은 자동으로 저장됩니다.\n\n💡 팁: 들여쓰기와 줄바꿈이 그대로 보존됩니다.",
+                    key=f"memo_input_{month_label}_part2"
+                )
+                
+                # 2파트 메모 저장 (입력 시마다 자동 저장)
+                if memo_text_part2 != st.session_state.get(memo_key_part2, ""):
+                    st.session_state[memo_key_part2] = memo_text_part2
+                    save_memo_to_file(memo_key_part2, memo_text_part2)
+                    st.success("✅ 2파트 메모가 저장되었습니다.", icon="💾")
+                
+                # 저장된 2파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
+                if st.session_state.get(memo_key_part2, ""):
+                    with st.expander("📋 저장된 2파트 메모 보기", expanded=False):
+                        # 입력 영역과 동일한 스타일로 표시 (일반 폰트, 줄바꿈 보존)
+                        memo_content = html.escape(st.session_state[memo_key_part2])
+                        # 줄바꿈을 <br>로 변환
+                        memo_content = memo_content.replace('\n', '<br>')
+                        # 입력 영역과 동일한 스타일 적용
+                        memo_display_part2 = f"<div style='white-space: pre-wrap; font-family: inherit; line-height: 1.5; padding: 0.5rem;'>{memo_content}</div>"
+                        st.markdown(memo_display_part2, unsafe_allow_html=True)
         
         # 주차별 경영진 회의록 추가
         st.markdown("---")
@@ -1846,12 +2060,16 @@ https://elsupervision.com/default/
                 meeting_summary = {}
                 for week in unique_weeks:
                     week_key = f"executive_meeting_{month_label}_{week}"
-                    # 파일에서 불러오기
-                    loaded_week_meeting = load_memo_from_file(week_key)
-                    if loaded_week_meeting:
-                        meeting_summary[week] = loaded_week_meeting
-                    elif week_key in st.session_state and st.session_state[week_key]:
+                    # session_state에 있으면 우선 사용 (최신 데이터), 없으면 파일에서 불러오기
+                    if week_key in st.session_state and st.session_state[week_key]:
                         meeting_summary[week] = st.session_state[week_key]
+                    else:
+                        # 파일에서 불러오기
+                        loaded_week_meeting = load_memo_from_file(week_key)
+                        if loaded_week_meeting:
+                            meeting_summary[week] = loaded_week_meeting
+                            # session_state에도 저장하여 다음에 빠르게 접근
+                            st.session_state[week_key] = loaded_week_meeting
                 
                 # 선택된 주차를 추적하여 주차 변경 시 자동으로 열리도록 함
                 summary_selected_week_key = f"summary_selected_week_{month_label}"
