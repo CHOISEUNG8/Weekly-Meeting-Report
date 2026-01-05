@@ -2048,21 +2048,57 @@ if uploaded_file is not None:
         st.markdown("---")
         st.markdown("#### 💎 핵심 매출 기여 상품 분석 (누적)")
         
+        # 11월, 12월, 1월 시트 찾기 및 합산
+        november_sheet = None
+        december_sheet = None
+        january_sheet = None
+        for sheet in sheet_names:
+            sheet_lower = sheet.lower()
+            if '11월' in sheet or ('11' in sheet and '월' in sheet) or 'november' in sheet_lower or 'nov' in sheet_lower:
+                november_sheet = sheet
+            if '12월' in sheet or ('12' in sheet and '월' in sheet) or 'december' in sheet_lower or 'dec' in sheet_lower:
+                december_sheet = sheet
+            if '1월' in sheet or ('1' in sheet and '월' in sheet and '11' not in sheet and '12' not in sheet) or 'january' in sheet_lower or 'jan' in sheet_lower:
+                january_sheet = sheet
+        
+        # 11월, 12월, 1월 시트를 모두 로드하여 합산
+        df_combined = pd.DataFrame()
+        loaded_sheets = []
+        
+        for month_name, sheet_name in [("11월", november_sheet), ("12월", december_sheet), ("1월", january_sheet)]:
+            if sheet_name:
+                try:
+                    df_month = pd.read_excel(xls, sheet_name=sheet_name)
+                    if len(df_month) > 0:
+                        df_combined = pd.concat([df_combined, df_month], ignore_index=True)
+                        loaded_sheets.append(month_name)
+                except Exception as e:
+                    st.warning(f"⚠️ {month_name} 시트({sheet_name})를 로드하는 중 오류 발생: {str(e)}")
+        
+        # 합산된 데이터가 있으면 사용, 없으면 기존 df 사용
+        if len(df_combined) > 0:
+            df_analysis = df_combined.copy()
+            # if len(loaded_sheets) > 0:
+            #     st.info(f"📊 {', '.join(loaded_sheets)} 시트 데이터를 합산하여 분석합니다. (총 {len(df_analysis):,}건)")  # 숨김 처리
+        else:
+            df_analysis = df.copy()
+            # st.info("📊 단일 시트 데이터를 분석합니다.")  # 숨김 처리
+        
         # A열 찾기 (플랫폼, 1번째 컬럼, 인덱스 0)
         platform_col = None
-        if len(df.columns) > 0:
-            platform_col = df.columns[0]  # A열 (1번째 컬럼)
+        if len(df_analysis.columns) > 0:
+            platform_col = df_analysis.columns[0]  # A열 (1번째 컬럼)
         
         # I열 찾기 (판매 수량, 9번째 컬럼, 인덱스 8)
         i_column_index = 8  # I열은 9번째 (0-based index: 8)
         sales_qty_col = None
-        if len(df.columns) > i_column_index:
-            sales_qty_col = df.columns[i_column_index]
+        if len(df_analysis.columns) > i_column_index:
+            sales_qty_col = df_analysis.columns[i_column_index]
         
         # 상품코드 컬럼 찾기 (일반적으로 C열 또는 D열 근처)
         product_code_col = None
         product_code_keywords = ['상품코드', 'product', 'code', '코드', '상품', '제품코드']
-        for idx, col in enumerate(df.columns):
+        for idx, col in enumerate(df_analysis.columns):
             col_str = str(col).lower()
             if any(keyword in col_str for keyword in product_code_keywords) and '상품명' not in col_str:
                 product_code_col = col
@@ -2070,15 +2106,15 @@ if uploaded_file is not None:
         
         # 상품코드 컬럼을 찾지 못한 경우 C열(인덱스 2) 또는 D열(인덱스 3) 시도
         if product_code_col is None:
-            if len(df.columns) > 2:
-                product_code_col = df.columns[2]  # C열
-            elif len(df.columns) > 3:
-                product_code_col = df.columns[3]  # D열
+            if len(df_analysis.columns) > 2:
+                product_code_col = df_analysis.columns[2]  # C열
+            elif len(df_analysis.columns) > 3:
+                product_code_col = df_analysis.columns[3]  # D열
         
         if platform_col and sales_qty_col and product_code_col:
             # 삼성베네포유 플랫폼 필터링
             samsung_beneforyou_keywords = ['삼성베네포유', '베네포유', 'beneforyou', 'samsung']
-            df_samsung = df[df[platform_col].astype(str).str.contains('|'.join(samsung_beneforyou_keywords), case=False, na=False, regex=True)]
+            df_samsung = df_analysis[df_analysis[platform_col].astype(str).str.contains('|'.join(samsung_beneforyou_keywords), case=False, na=False, regex=True)]
             
             if len(df_samsung) > 0:
                 # 판매수량이 숫자형이 아니면 변환
@@ -2093,15 +2129,15 @@ if uploaded_file is not None:
                 # 업체명 컬럼 찾기
                 company_col = None
                 company_keywords = ['업체', '제조사', 'company', 'manufacturer', 'maker', '회사', '고객', 'customer', '제조업체']
-                for col in df.columns:
+                for col in df_analysis.columns:
                     col_str = str(col).lower()
                     if any(keyword in col_str for keyword in company_keywords):
                         company_col = col
                         break
                 
                 # 업체명 컬럼을 찾지 못한 경우 B열(인덱스 1) 시도
-                if company_col is None and len(df.columns) > 1:
-                    company_col = df.columns[1]  # B열
+                if company_col is None and len(df_analysis.columns) > 1:
+                    company_col = df_analysis.columns[1]  # B열
                 
                 # 업체명 추가 (있는 경우)
                 if company_col:
@@ -2115,7 +2151,7 @@ if uploaded_file is not None:
                 # 상품명 컬럼 찾기 (있는 경우)
                 product_name_col = None
                 product_name_keywords = ['상품명', 'product name', '품명', 'name', '제품명', '상품이름']
-                for col in df.columns:
+                for col in df_analysis.columns:
                     col_str = str(col).lower()
                     if any(keyword in col_str for keyword in product_name_keywords):
                         product_name_col = col
