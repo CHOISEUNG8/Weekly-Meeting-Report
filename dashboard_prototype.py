@@ -483,17 +483,25 @@ if uploaded_file is not None:
                         st.warning(f"⚠️ 날짜 컬럼에서 {selected_month}월 데이터를 찾지 못했습니다. 전체 데이터를 표시합니다.")
                 elif selected_month is None:
                     # 시트 이름에서 월을 찾지 못한 경우 전체 데이터 표시
-                    st.info(f"📊 '{selected_sheet}' 시트의 전체 데이터를 표시합니다.")
+                    # st.info(f"📊 '{selected_sheet}' 시트의 전체 데이터를 표시합니다.")  # 숨김 처리
+                    pass
             else:
                 # 날짜 컬럼이 없으면 시트 이름으로 판단
                 if selected_month is not None:
-                    st.info(f"📊 '{selected_sheet}' 시트의 전체 데이터를 표시합니다.")
+                    # st.info(f"📊 '{selected_sheet}' 시트의 전체 데이터를 표시합니다.")  # 숨김 처리
+                    pass
             
             # 사이드바 필터
             st.sidebar.header("필터 옵션")
         
         # 주차 정보 계산 (사이드바에서 경영진 회의록 사용하기 위해)
-        month_label_sidebar = f"{selected_month}월" if selected_month is not None else "월"
+        # selected_month가 None인 경우 데이터에서 월 추출
+        month_for_sidebar_temp = selected_month
+        if month_for_sidebar_temp is None and len(df) > 0 and '월' in df.columns:
+            unique_months = sorted(df['월'].dropna().unique())
+            if len(unique_months) == 1:
+                month_for_sidebar_temp = int(unique_months[0])
+        month_label_sidebar = f"{month_for_sidebar_temp}월" if month_for_sidebar_temp is not None else "월"
         
         # 주차를 역순으로 정렬하는 함수 (다섯째주 → 첫째주)
         def sort_weeks_korean_sidebar(weeks):
@@ -509,6 +517,13 @@ if uploaded_file is not None:
         
         # 주차 정보 계산 (사이드바에서 사용하기 위해)
         sidebar_weeks = []
+        # selected_month가 None인 경우 데이터에서 월 추출 (블록 밖에서도 사용하기 위해 먼저 계산)
+        month_for_sidebar = selected_month
+        if month_for_sidebar is None and len(df) > 0 and '월' in df.columns:
+            unique_months = sorted(df['월'].dropna().unique())
+            if len(unique_months) == 1:
+                month_for_sidebar = int(unique_months[0])
+        
         if len(date_columns) > 0:
             date_col = date_columns[0]
             df_temp = df.copy()
@@ -538,7 +553,7 @@ if uploaded_file is not None:
                             return f"{month_label} {week_korean[relative_week]}주"
                 return f"{month_label} {week_num}주"
             
-            df_temp['주차_한글'] = df_temp['주차'].apply(lambda x: week_to_korean_sidebar(x, min_week, selected_month, max_week))
+            df_temp['주차_한글'] = df_temp['주차'].apply(lambda x: week_to_korean_sidebar(x, min_week, month_for_sidebar, max_week))
             # None 값 제거 (다섯째주가 존재하지 않는 경우)
             sidebar_weeks_all = [w for w in df_temp['주차_한글'].unique().tolist() if w is not None]
             
@@ -572,8 +587,8 @@ if uploaded_file is not None:
         
         # 주차별 경영진 회의록 입력 및 요약
         if len(sidebar_weeks) > 0:
-            # 사이드바와 메인 페이지 동기화를 위한 키 (selected_month를 직접 사용)
-            month_key = f"{selected_month}월" if selected_month is not None else "월"
+            # 사이드바와 메인 페이지 동기화를 위한 키 (month_for_sidebar 사용)
+            month_key = f"{month_for_sidebar}월" if month_for_sidebar is not None else "월"
             sidebar_week_select_key = f"sidebar_week_select_{month_key}"
             main_week_select_key = f"main_week_select_{month_key}"
             
@@ -582,7 +597,7 @@ if uploaded_file is not None:
             current_week_num = get_custom_week(today)
             current_week_korean = None
             if current_week_num is not None and min_week is not None:
-                current_week_korean = week_to_korean_sidebar(current_week_num, min_week, selected_month)
+                current_week_korean = week_to_korean_sidebar(current_week_num, min_week, month_for_sidebar)
             
             # 주차 선택 (사이드바와 메인 페이지 동기화)
             # 우선순위: 1) 메인 페이지 선택, 2) 사이드바 이전 선택, 3) 오늘 날짜 기준 주차, 4) 첫 번째 주차
@@ -615,59 +630,51 @@ if uploaded_file is not None:
             # 선택된 주차의 경영진 회의록 키
             executive_meeting_key_sidebar = f"executive_meeting_{month_label_for_meeting}_{selected_week_sidebar}"
             
+            # 입력창의 키 (주차별로 고정되어 주차 변경 시 자동으로 새 입력창 생성)
+            executive_input_key = f"executive_meeting_input_sidebar_{month_label_for_meeting}_{selected_week_sidebar}"
+            
             # 주차별로 독립적인 session_state 키 사용 (주차가 변경되면 항상 파일에서 불러오기)
             current_week_state_key_executive = f"current_week_sidebar_executive_{executive_meeting_key_sidebar}"
-            if current_week_state_key_executive not in st.session_state or st.session_state.get(f"last_selected_week_sidebar_executive_{month_label_for_meeting}") != selected_week_sidebar:
+            last_selected_week_key = f"last_selected_week_sidebar_executive_{month_label_for_meeting}"
+            
+            # 주차가 변경되었는지 확인
+            if current_week_state_key_executive not in st.session_state or st.session_state.get(last_selected_week_key) != selected_week_sidebar:
                 # 주차가 변경되었거나 처음 로드하는 경우 파일에서 불러오기
                 loaded_executive_meeting = load_memo_from_file(executive_meeting_key_sidebar)
                 if loaded_executive_meeting:
                     st.session_state[executive_meeting_key_sidebar] = loaded_executive_meeting
+                    # 입력창의 session_state도 업데이트
+                    st.session_state[executive_input_key] = loaded_executive_meeting
                 else:
                     if executive_meeting_key_sidebar not in st.session_state:
                         st.session_state[executive_meeting_key_sidebar] = ""
+                    # 입력창의 session_state도 초기화
+                    if executive_input_key not in st.session_state:
+                        st.session_state[executive_input_key] = ""
                 st.session_state[current_week_state_key_executive] = True
-                st.session_state[f"last_selected_week_sidebar_executive_{month_label_for_meeting}"] = selected_week_sidebar
+                st.session_state[last_selected_week_key] = selected_week_sidebar
             else:
                 # 주차가 변경되지 않았지만 파일에 최신 데이터가 있을 수 있으므로 확인
                 if executive_meeting_key_sidebar not in st.session_state or not st.session_state.get(executive_meeting_key_sidebar):
                     loaded_executive_meeting = load_memo_from_file(executive_meeting_key_sidebar)
                     if loaded_executive_meeting:
                         st.session_state[executive_meeting_key_sidebar] = loaded_executive_meeting
+                        # 입력창의 session_state도 업데이트
+                        if executive_input_key not in st.session_state:
+                            st.session_state[executive_input_key] = loaded_executive_meeting
             
-            # 경영진 회의록 입력 (기존 내용이 표시되고, 추가 작성 시 하단에 이어짐)
-            current_executive_value = st.session_state.get(executive_meeting_key_sidebar, "")
-            
-            # 입력창의 키 (주차별로 고정되어 주차 변경 시 자동으로 새 입력창 생성)
-            executive_input_key = f"executive_meeting_input_sidebar_{month_label_for_meeting}_{selected_week_sidebar}"
-            
-            # 입력창이 처음 생성될 때만 기존 내용으로 초기화
-            executive_input_initial_value = current_executive_value
-            
-            # 입력창이 처음 생성될 때 파일에서 최신 내용 확인
+            # 입력창이 처음 생성될 때 초기값 설정
             if executive_input_key not in st.session_state:
+                # 파일에서 최신 내용 확인
                 latest_from_file = load_memo_from_file(executive_meeting_key_sidebar)
                 if latest_from_file:
-                    executive_input_initial_value = latest_from_file
+                    st.session_state[executive_input_key] = latest_from_file
                     st.session_state[executive_meeting_key_sidebar] = latest_from_file
-                elif current_executive_value:
-                    executive_input_initial_value = current_executive_value
                 else:
-                    executive_input_initial_value = ""
-            
-            # 주차가 변경되지 않았을 때도 파일에서 최신 내용 확인 (다른 곳에서 저장된 경우 대비)
-            if st.session_state.get(f"last_selected_week_sidebar_executive_{month_label_for_meeting}") == selected_week_sidebar:
-                latest_from_file = load_memo_from_file(executive_meeting_key_sidebar)
-                if latest_from_file and latest_from_file != executive_input_initial_value:
-                    executive_input_initial_value = latest_from_file
-                    st.session_state[executive_meeting_key_sidebar] = latest_from_file
-            
-            # 입력창 생성 (입력창 생성 후에는 해당 키의 session_state 수정 불가)
-            if executive_input_key not in st.session_state:
-                st.session_state[executive_input_key] = executive_input_initial_value
+                    st.session_state[executive_input_key] = st.session_state.get(executive_meeting_key_sidebar, "")
             
             executive_meeting_text_sidebar = st.sidebar.text_area(
                 f"{selected_week_sidebar} 경영진 회의록을 입력하세요",
-                value=st.session_state.get(executive_input_key, executive_input_initial_value),
                 height=150,
                 placeholder=f"{selected_week_sidebar} 경영진 회의록을 작성하세요. 내용은 자동으로 저장됩니다.\n\n💡 기존 내용이 있으면 표시되며, 추가 작성 시 하단에 이어집니다.",
                 key=executive_input_key
@@ -736,7 +743,20 @@ if uploaded_file is not None:
                 df = df[df['월'].isin(selected_months)]
             
             # 선택된 월 목표 달성율 계산
-            month_label = f"{selected_month}월" if selected_month is not None else "월"
+            # month_label 설정: selected_month가 있으면 사용, 없으면 필터링된 데이터에서 월 추출
+            if selected_month is not None:
+                month_label = f"{selected_month}월"
+            elif len(df) > 0 and '월' in df.columns:
+                # 필터링된 데이터에서 고유한 월 추출 (하나의 월만 있는 경우)
+                unique_months = sorted(df['월'].dropna().unique())
+                if len(unique_months) == 1:
+                    month_label = f"{int(unique_months[0])}월"
+                elif len(selected_months) == 1:
+                    month_label = f"{int(selected_months[0])}월"
+                else:
+                    month_label = "월"
+            else:
+                month_label = "월"
             st.subheader(f"🎯 {month_label} 목표 달성 현황")
             
             # 목표 설정
@@ -1013,7 +1033,18 @@ if uploaded_file is not None:
         st.markdown("---")
         
         # 선택된 월 데이터 분석 차트
-        month_label = f"{selected_month}월" if selected_month is not None else "월"
+        # month_label 설정: selected_month가 있으면 사용, 없으면 필터링된 데이터에서 월 추출
+        if selected_month is not None:
+            month_label = f"{selected_month}월"
+        elif len(df) > 0 and '월' in df.columns:
+            # 필터링된 데이터에서 고유한 월 추출 (하나의 월만 있는 경우)
+            unique_months = sorted(df['월'].dropna().unique())
+            if len(unique_months) == 1:
+                month_label = f"{int(unique_months[0])}월"
+            else:
+                month_label = "월"
+        else:
+            month_label = "월"
         st.subheader(f"📊 {month_label} 데이터 분석")
         
         # 주차 번호를 한국어로 변환하는 함수
@@ -1049,8 +1080,15 @@ if uploaded_file is not None:
                 min_week = df['주차'].min() if len(df) > 0 and df['주차'].notna().any() else None
                 max_week = df['주차'].max() if len(df) > 0 and df['주차'].notna().any() else None
                 
+                # selected_month가 None인 경우 데이터에서 월 추출
+                month_for_week_label = selected_month
+                if month_for_week_label is None and len(df) > 0 and '월' in df.columns:
+                    unique_months = sorted(df['월'].dropna().unique())
+                    if len(unique_months) == 1:
+                        month_for_week_label = int(unique_months[0])
+                
                 # 주차를 한국어로 변환
-                df['주차_한글'] = df['주차'].apply(lambda x: week_to_korean(x, min_week, selected_month, max_week))
+                df['주차_한글'] = df['주차'].apply(lambda x: week_to_korean(x, min_week, month_for_week_label, max_week))
                 # None 값 제거 (다섯째주가 존재하지 않는 경우)
                 df = df[df['주차_한글'].notna()]
                 
@@ -1089,14 +1127,22 @@ if uploaded_file is not None:
                     if '년' in df.columns and len(df) > 0:
                         year = int(df['년'].dropna().iloc[0]) if df['년'].notna().any() else None
                     
+                    # selected_month가 None인 경우 기본값 사용 (데이터에서 추출하거나 현재 월)
+                    month_for_calculation = selected_month
+                    if month_for_calculation is None:
+                        if '월' in df.columns and len(df) > 0:
+                            month_for_calculation = int(df['월'].dropna().iloc[0]) if df['월'].notna().any() else None
+                        if month_for_calculation is None:
+                            month_for_calculation = pd.Timestamp.now().month
+                    
                     for week_num in unique_weeks_sorted:
-                        start_date, end_date = get_week_date_range(week_num, selected_month, min_week, year)
+                        start_date, end_date = get_week_date_range(week_num, month_for_calculation, min_week, year)
                         if start_date and end_date:
                             # 시작일(금요일)의 월을 기준으로 주차 레이블 결정
                             start_month = start_date.month
                             
                             # 시작일이 선택된 월과 다르면 해당 주차는 제외 (다른 월에서 표시되어야 함)
-                            if start_month != selected_month:
+                            if selected_month is not None and start_month != selected_month:
                                 continue  # 이 주차는 제외하고 다음 주차로
                             
                             # 시작일이 선택된 월과 같으면 기존 레이블 사용
@@ -1213,7 +1259,17 @@ if uploaded_file is not None:
                             tickformat=',',
                             showgrid=False  # 오른쪽 Y축 그리드선 비활성화
                         )
-                        month_label = f"{selected_month}월" if selected_month is not None else "월"
+                        # month_label 설정: selected_month가 있으면 사용, 없으면 필터링된 데이터에서 월 추출
+                        if selected_month is not None:
+                            month_label = f"{selected_month}월"
+                        elif len(df) > 0 and '월' in df.columns:
+                            unique_months = sorted(df['월'].dropna().unique())
+                            if len(unique_months) == 1:
+                                month_label = f"{int(unique_months[0])}월"
+                            else:
+                                month_label = "월"
+                        else:
+                            month_label = "월"
                         fig_weekly.update_layout(
                             title=f'{month_label} 주차별 총 판매수량 및 매출이익금',
                             hovermode='x unified',
@@ -1342,7 +1398,17 @@ if uploaded_file is not None:
                             tickformat=',',
                             showgrid=False  # 오른쪽 Y축 그리드선 비활성화
                         )
-                        month_label = f"{selected_month}월" if selected_month is not None else "월"
+                        # month_label 설정: selected_month가 있으면 사용, 없으면 필터링된 데이터에서 월 추출
+                        if selected_month is not None:
+                            month_label = f"{selected_month}월"
+                        elif len(df) > 0 and '월' in df.columns:
+                            unique_months = sorted(df['월'].dropna().unique())
+                            if len(unique_months) == 1:
+                                month_label = f"{int(unique_months[0])}월"
+                            else:
+                                month_label = "월"
+                        else:
+                            month_label = "월"
                         fig_daily.update_layout(
                             title=f'{month_label} 일별 총 판매수량 및 매출이익금 추이',
                             hovermode='x unified',
@@ -1650,7 +1716,17 @@ if uploaded_file is not None:
         st.markdown("---")
         
         # 플랫폼별 비교
-        month_label = f"{selected_month}월" if selected_month is not None else "월"
+        # month_label 설정: selected_month가 있으면 사용, 없으면 필터링된 데이터에서 월 추출
+        if selected_month is not None:
+            month_label = f"{selected_month}월"
+        elif len(df) > 0 and '월' in df.columns:
+            unique_months = sorted(df['월'].dropna().unique())
+            if len(unique_months) == 1:
+                month_label = f"{int(unique_months[0])}월"
+            else:
+                month_label = "월"
+        else:
+            month_label = "월"
         st.subheader(f"📋 플랫폼별 분석 ({month_label})")
         
         # 파트 컬럼 확인 및 생성
@@ -1687,12 +1763,12 @@ if uploaded_file is not None:
         if len(category_columns) > 0:
             category_col = st.selectbox("분류 기준 선택", category_columns, key='category_select')
             
-            # 파트별 분석 (1파트, 2파트)
+            # 파트별 분석 (전체, 1파트, 2파트)
             if part_col and part_col in df.columns:
                 # 파트별 탭 생성
-                part_tabs_analysis = st.tabs(["1파트", "2파트", "전체"])
+                part_tabs_analysis = st.tabs(["전체", "1파트", "2파트"])
                 
-                for tab_idx, part_name in enumerate(["1파트", "2파트", "전체"]):
+                for tab_idx, part_name in enumerate(["전체", "1파트", "2파트"]):
                     with part_tabs_analysis[tab_idx]:
                         # 파트별 데이터 필터링
                         if part_name == "전체":
@@ -2121,8 +2197,8 @@ if uploaded_file is not None:
             unique_weeks = sort_weeks_korean_for_part(df['주차_한글'].unique().tolist())
             
             if len(unique_weeks) > 0:
-                # 사이드바와 메인 페이지 동기화를 위한 키 (selected_month를 직접 사용)
-                month_key = f"{selected_month}월" if selected_month is not None else "월"
+                # 사이드바와 메인 페이지 동기화를 위한 키 (month_label 사용)
+                month_key = month_label  # month_label은 이미 데이터에서 월을 추출해서 설정됨
                 sidebar_week_select_key = f"sidebar_week_select_{month_key}"
                 part_week_select_key = f"part_week_select_{month_key}"
                 
