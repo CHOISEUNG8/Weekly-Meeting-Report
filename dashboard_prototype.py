@@ -87,6 +87,37 @@ def get_custom_week(date):
     
     return week_number
 
+# 주차별 날짜 범위 계산 함수 (지난주 금요일 ~ 이번주 목요일)
+def get_week_date_range(week_num, month, min_week, year=None):
+    """주차 번호에 해당하는 날짜 범위 반환 (지난주 금요일 ~ 이번주 목요일)"""
+    if week_num is None or min_week is None:
+        return None, None
+    
+    # 년도가 없으면 현재 년도 사용
+    if year is None:
+        year = 2024
+    
+    # 해당 월의 첫 번째 금요일 찾기
+    first_day_of_month = pd.Timestamp(year=year, month=month, day=1)
+    first_weekday = first_day_of_month.weekday()
+    
+    if first_weekday <= 4:  # 월~금
+        days_to_first_friday = 4 - first_weekday
+    else:  # 토~일
+        days_to_first_friday = 4 - first_weekday + 7
+    
+    first_friday = first_day_of_month + pd.Timedelta(days=days_to_first_friday)
+    
+    # 주차 번호에 해당하는 금요일 계산
+    relative_week = week_num - min_week
+    base_friday = first_friday + pd.Timedelta(days=relative_week * 7)
+    
+    # 해당 주차의 시작일 (금요일)과 종료일 (목요일)
+    start_date = base_friday  # 금요일
+    end_date = base_friday + pd.Timedelta(days=6)  # 목요일
+    
+    return start_date, end_date
+
 def save_memo_to_file(key, value):
     """메모를 JSON 파일로 저장 (원본 포맷 보존)"""
     try:
@@ -485,19 +516,59 @@ if uploaded_file is not None:
             # 지난주 금요일 ~ 이번주 목요일 기준으로 주차 계산
             df_temp['주차'] = df_temp[date_col].apply(get_custom_week)
             min_week = df_temp['주차'].min() if len(df_temp) > 0 and df_temp['주차'].notna().any() else None
+            max_week = df_temp['주차'].max() if len(df_temp) > 0 and df_temp['주차'].notna().any() else None
             
             # 주차 번호를 한국어로 변환하는 함수
-            def week_to_korean_sidebar(week_num, min_week=None, month=None):
+            def week_to_korean_sidebar(week_num, min_week=None, month=None, max_week=None):
                 week_korean = ['첫째', '둘째', '셋째', '넷째', '다섯째']
                 month_label = f"{month}월" if month is not None else "월"
                 if min_week is not None:
                     relative_week = week_num - min_week
+                    # 다섯째주는 실제 데이터에 존재할 때만 표시 (relative_week이 4인 경우만)
                     if 0 <= relative_week < len(week_korean):
-                        return f"{month_label} {week_korean[relative_week]}주"
+                        # 다섯째주(relative_week=4)인 경우, max_week을 확인하여 실제로 존재하는지 체크
+                        if relative_week == 4:
+                            # max_week이 min_week + 4 이상이어야 다섯째주가 존재
+                            if max_week is not None and max_week >= min_week + 4:
+                                return f"{month_label} {week_korean[relative_week]}주"
+                            else:
+                                # 다섯째주가 존재하지 않으면 None 반환 (표시하지 않음)
+                                return None
+                        else:
+                            return f"{month_label} {week_korean[relative_week]}주"
                 return f"{month_label} {week_num}주"
             
-            df_temp['주차_한글'] = df_temp['주차'].apply(lambda x: week_to_korean_sidebar(x, min_week, selected_month))
-            sidebar_weeks = sort_weeks_korean_sidebar(df_temp['주차_한글'].unique().tolist())
+            df_temp['주차_한글'] = df_temp['주차'].apply(lambda x: week_to_korean_sidebar(x, min_week, selected_month, max_week))
+            # None 값 제거 (다섯째주가 존재하지 않는 경우)
+            sidebar_weeks_all = [w for w in df_temp['주차_한글'].unique().tolist() if w is not None]
+            
+            # 시작일이 선택된 월과 다른 주차는 제외 (다른 월에서 표시되어야 함)
+            if selected_month is not None and len(sidebar_weeks_all) > 0:
+                # 년도 추출
+                year = None
+                if '년' in df_temp.columns and len(df_temp) > 0:
+                    year = int(df_temp['년'].dropna().iloc[0]) if df_temp['년'].notna().any() else 2024
+                else:
+                    year = 2024
+                
+                # 각 주차의 시작일 확인하여 선택된 월과 같은 주차만 유지
+                valid_sidebar_weeks = []
+                for week_korean in sidebar_weeks_all:
+                    # 주차 번호 찾기
+                    week_num = None
+                    for idx, row in df_temp.iterrows():
+                        if row['주차_한글'] == week_korean:
+                            week_num = row['주차']
+                            break
+                    
+                    if week_num is not None:
+                        start_date, end_date = get_week_date_range(week_num, selected_month, min_week, year)
+                        if start_date and start_date.month == selected_month:
+                            valid_sidebar_weeks.append(week_korean)
+                
+                sidebar_weeks = sort_weeks_korean_sidebar(valid_sidebar_weeks)
+            else:
+                sidebar_weeks = sort_weeks_korean_sidebar(sidebar_weeks_all)
         
         # 주차별 경영진 회의록 입력 및 요약
         if len(sidebar_weeks) > 0:
@@ -946,7 +1017,7 @@ if uploaded_file is not None:
         st.subheader(f"📊 {month_label} 데이터 분석")
         
         # 주차 번호를 한국어로 변환하는 함수
-        def week_to_korean(week_num, min_week=None, month=None):
+        def week_to_korean(week_num, min_week=None, month=None, max_week=None):
             """주차 번호를 한국어로 변환 (예: 45 -> '11월 첫째주' 또는 '12월 첫째주')"""
             week_korean = ['첫째', '둘째', '셋째', '넷째', '다섯째']
             month_label = f"{month}월" if month is not None else "월"
@@ -954,42 +1025,17 @@ if uploaded_file is not None:
                 # 최소 주차를 기준으로 상대적 주차 계산
                 relative_week = week_num - min_week
                 if 0 <= relative_week < len(week_korean):
-                    return f"{month_label} {week_korean[relative_week]}주"
+                    # 다섯째주는 실제 데이터에 존재할 때만 표시 (relative_week이 4인 경우만)
+                    if relative_week == 4:
+                        # max_week이 min_week + 4 이상이어야 다섯째주가 존재
+                        if max_week is not None and max_week >= min_week + 4:
+                            return f"{month_label} {week_korean[relative_week]}주"
+                        else:
+                            # 다섯째주가 존재하지 않으면 None 반환 (표시하지 않음)
+                            return None
+                    else:
+                        return f"{month_label} {week_korean[relative_week]}주"
             return f"{month_label} {week_num}주"
-        
-        # 주차별 날짜 범위 계산 함수 (지난주 금요일 ~ 이번주 목요일)
-        def get_week_date_range(week_num, month, min_week, year=None):
-            """주차 번호에 해당하는 날짜 범위 반환 (지난주 금요일 ~ 이번주 목요일)"""
-            if week_num is None or min_week is None:
-                return None, None
-            
-            # 년도가 없으면 현재 년도 또는 데이터에서 추출
-            if year is None:
-                if '년' in df.columns and len(df) > 0:
-                    year = int(df['년'].dropna().iloc[0]) if df['년'].notna().any() else 2024
-                else:
-                    year = 2024
-            
-            # 해당 월의 첫 번째 금요일 찾기
-            first_day_of_month = pd.Timestamp(year=year, month=month, day=1)
-            first_weekday = first_day_of_month.weekday()
-            
-            if first_weekday <= 4:  # 월~금
-                days_to_first_friday = 4 - first_weekday
-            else:  # 토~일
-                days_to_first_friday = 4 - first_weekday + 7
-            
-            first_friday = first_day_of_month + pd.Timedelta(days=days_to_first_friday)
-            
-            # 주차 번호에 해당하는 금요일 계산
-            relative_week = week_num - min_week
-            base_friday = first_friday + pd.Timedelta(days=relative_week * 7)
-            
-            # 해당 주차의 시작일 (금요일)과 종료일 (목요일)
-            start_date = base_friday  # 금요일
-            end_date = base_friday + pd.Timedelta(days=6)  # 목요일
-            
-            return start_date, end_date
         
         # 주간별 또는 일별 트렌드 (날짜 컬럼이 있는 경우)
         if '년월' in df.columns or len(date_columns) > 0:
@@ -1001,9 +1047,31 @@ if uploaded_file is not None:
                 
                 # 선택된 월의 최소 주차 번호 찾기 (첫째주 기준)
                 min_week = df['주차'].min() if len(df) > 0 and df['주차'].notna().any() else None
+                max_week = df['주차'].max() if len(df) > 0 and df['주차'].notna().any() else None
                 
                 # 주차를 한국어로 변환
-                df['주차_한글'] = df['주차'].apply(lambda x: week_to_korean(x, min_week, selected_month))
+                df['주차_한글'] = df['주차'].apply(lambda x: week_to_korean(x, min_week, selected_month, max_week))
+                # None 값 제거 (다섯째주가 존재하지 않는 경우)
+                df = df[df['주차_한글'].notna()]
+                
+                # 시작일이 선택된 월과 다른 주차는 제외 (다른 월에서 표시되어야 함)
+                if selected_month is not None and '주차' in df.columns:
+                    # 각 주차의 시작일 확인
+                    year = None
+                    if '년' in df.columns and len(df) > 0:
+                        year = int(df['년'].dropna().iloc[0]) if df['년'].notna().any() else 2024
+                    else:
+                        year = 2024
+                    
+                    # 고유한 주차 번호에 대해 시작일 확인
+                    valid_weeks = set()
+                    for week_num in df['주차'].dropna().unique():
+                        start_date, end_date = get_week_date_range(week_num, selected_month, min_week, year)
+                        if start_date and start_date.month == selected_month:
+                            valid_weeks.add(week_num)
+                    
+                    # 시작일이 선택된 월과 같은 주차만 유지
+                    df = df[df['주차'].isin(valid_weeks)]
                 
                 # 주차 산출 내역 표시
                 if min_week is not None and '주차_한글' in df.columns:
@@ -1022,9 +1090,18 @@ if uploaded_file is not None:
                         year = int(df['년'].dropna().iloc[0]) if df['년'].notna().any() else None
                     
                     for week_num in unique_weeks_sorted:
-                        week_korean = df[df['주차'] == week_num]['주차_한글'].iloc[0] if len(df[df['주차'] == week_num]) > 0 else f"{month_label} {week_num}주"
                         start_date, end_date = get_week_date_range(week_num, selected_month, min_week, year)
                         if start_date and end_date:
+                            # 시작일(금요일)의 월을 기준으로 주차 레이블 결정
+                            start_month = start_date.month
+                            
+                            # 시작일이 선택된 월과 다르면 해당 주차는 제외 (다른 월에서 표시되어야 함)
+                            if start_month != selected_month:
+                                continue  # 이 주차는 제외하고 다음 주차로
+                            
+                            # 시작일이 선택된 월과 같으면 기존 레이블 사용
+                            week_korean = df[df['주차'] == week_num]['주차_한글'].iloc[0] if len(df[df['주차'] == week_num]) > 0 else f"{month_label} {week_num}주"
+                            
                             # 요일을 한국어로 변환
                             weekdays_kr = ['월', '화', '수', '목', '금', '토', '일']
                             start_weekday_kr = weekdays_kr[start_date.weekday()]
