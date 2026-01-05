@@ -28,6 +28,65 @@ MEMO_DATA_DIR = "memo_data"
 if not os.path.exists(MEMO_DATA_DIR):
     os.makedirs(MEMO_DATA_DIR)
 
+# 주차 계산 함수 (지난주 금요일 ~ 이번주 목요일 기준)
+def get_custom_week(date):
+    """지난주 금요일 ~ 이번주 목요일 기준으로 주차 계산
+    예: 12월 5일(금) ~ 12월 11일(목)까지가 하나의 주차
+    
+    기준: 지난주 금요일부터 이번주 목요일까지가 하나의 주차
+    - 금요일: 해당 주차의 시작일
+    - 토요일~목요일: 같은 주차
+    """
+    if pd.isna(date):
+        return None
+    
+    # 날짜의 요일 (0=월요일, 4=금요일, 6=일요일)
+    weekday = date.weekday()
+    
+    # 해당 주차의 기준 금요일 찾기 (지난주 금요일)
+    # 금요일(4)이면 그 날이 기준, 그 외에는 가장 가까운 이전 금요일
+    if weekday == 4:  # 금요일
+        base_friday = date
+    elif weekday == 5:  # 토요일
+        base_friday = date - pd.Timedelta(days=1)
+    elif weekday == 6:  # 일요일
+        base_friday = date - pd.Timedelta(days=2)
+    else:  # 월(0), 화(1), 수(2), 목(3)
+        # 월요일이면 3일 전 금요일, 화요일이면 4일 전 금요일, 수요일이면 5일 전 금요일, 목요일이면 6일 전 금요일
+        base_friday = date - pd.Timedelta(days=weekday + 3)
+    
+    # 해당 월의 첫 번째 금요일 찾기
+    first_day_of_month = base_friday.replace(day=1)
+    first_weekday = first_day_of_month.weekday()
+    
+    # 첫 번째 금요일 계산
+    if first_weekday <= 4:  # 월~금
+        days_to_first_friday = 4 - first_weekday
+    else:  # 토~일
+        days_to_first_friday = 4 - first_weekday + 7
+    
+    first_friday = first_day_of_month + pd.Timedelta(days=days_to_first_friday)
+    
+    # 주차 번호 계산 (해당 월의 몇 번째 주차인지)
+    if base_friday < first_friday:
+        # 기준 금요일이 해당 월의 첫 번째 금요일보다 이전이면 이전 달의 마지막 주차
+        # 이전 달의 마지막 금요일을 찾아서 계산
+        prev_month_last_day = first_day_of_month - pd.Timedelta(days=1)
+        prev_month_first_day = prev_month_last_day.replace(day=1)
+        prev_first_weekday = prev_month_first_day.weekday()
+        
+        if prev_first_weekday <= 4:
+            prev_days_to_first_friday = 4 - prev_first_weekday
+        else:
+            prev_days_to_first_friday = 4 - prev_first_weekday + 7
+        
+        prev_first_friday = prev_month_first_day + pd.Timedelta(days=prev_days_to_first_friday)
+        week_number = ((base_friday - prev_first_friday).days // 7) + 1
+    else:
+        week_number = ((base_friday - first_friday).days // 7) + 1
+    
+    return week_number
+
 def save_memo_to_file(key, value):
     """메모를 JSON 파일로 저장 (원본 포맷 보존)"""
     try:
@@ -402,21 +461,20 @@ if uploaded_file is not None:
             # 사이드바 필터
             st.sidebar.header("필터 옵션")
         
-        # 회의결과 및 경영자의견 메모장 추가 (사이드바 - 주차별)
+        # 주차 정보 계산 (사이드바에서 경영진 회의록 사용하기 위해)
         month_label_sidebar = f"{selected_month}월" if selected_month is not None else "월"
-        st.sidebar.markdown("---")
-        st.sidebar.markdown(f"#### 📝 {month_label_sidebar} 회의결과 및 경영자의견")
         
-        # 주차를 올바른 순서로 정렬하는 함수
+        # 주차를 역순으로 정렬하는 함수 (다섯째주 → 첫째주)
         def sort_weeks_korean_sidebar(weeks):
-            """주차를 첫째주, 둘째주, 셋째주, 넷째주 순서로 정렬"""
+            """주차를 다섯째주, 넷째주, 셋째주, 둘째주, 첫째주 순서로 정렬"""
             week_order = {'첫째': 1, '둘째': 2, '셋째': 3, '넷째': 4, '다섯째': 5}
             def get_week_number(week_str):
                 for key, value in week_order.items():
                     if key in week_str:
                         return value
                 return 999  # 알 수 없는 주차는 마지막에
-            return sorted(weeks, key=get_week_number)
+            # 역순으로 정렬 (다섯째주가 먼저)
+            return sorted(weeks, key=get_week_number, reverse=True)
         
         # 주차 정보 계산 (사이드바에서 사용하기 위해)
         sidebar_weeks = []
@@ -424,8 +482,9 @@ if uploaded_file is not None:
             date_col = date_columns[0]
             df_temp = df.copy()
             df_temp[date_col] = pd.to_datetime(df_temp[date_col], errors='coerce')
-            df_temp['주차'] = df_temp[date_col].dt.isocalendar().week
-            min_week = df_temp['주차'].min() if len(df_temp) > 0 else None
+            # 지난주 금요일 ~ 이번주 목요일 기준으로 주차 계산
+            df_temp['주차'] = df_temp[date_col].apply(get_custom_week)
+            min_week = df_temp['주차'].min() if len(df_temp) > 0 and df_temp['주차'].notna().any() else None
             
             # 주차 번호를 한국어로 변환하는 함수
             def week_to_korean_sidebar(week_num, min_week=None, month=None):
@@ -440,21 +499,31 @@ if uploaded_file is not None:
             df_temp['주차_한글'] = df_temp['주차'].apply(lambda x: week_to_korean_sidebar(x, min_week, selected_month))
             sidebar_weeks = sort_weeks_korean_sidebar(df_temp['주차_한글'].unique().tolist())
         
-        # 주차별 회의결과 및 경영자의견
+        # 주차별 경영진 회의록 입력 및 요약
         if len(sidebar_weeks) > 0:
             # 사이드바와 메인 페이지 동기화를 위한 키 (selected_month를 직접 사용)
             month_key = f"{selected_month}월" if selected_month is not None else "월"
             sidebar_week_select_key = f"sidebar_week_select_{month_key}"
             main_week_select_key = f"main_week_select_{month_key}"
             
+            # 오늘 날짜를 기반으로 현재 주차 계산
+            today = pd.Timestamp.now()
+            current_week_num = get_custom_week(today)
+            current_week_korean = None
+            if current_week_num is not None and min_week is not None:
+                current_week_korean = week_to_korean_sidebar(current_week_num, min_week, selected_month)
+            
             # 주차 선택 (사이드바와 메인 페이지 동기화)
-            # 메인 페이지에서 선택한 주차가 있으면 그것을 사용, 없으면 첫 번째 주차
+            # 우선순위: 1) 메인 페이지 선택, 2) 사이드바 이전 선택, 3) 오늘 날짜 기준 주차, 4) 첫 번째 주차
             if main_week_select_key in st.session_state and st.session_state[main_week_select_key] in sidebar_weeks:
                 # 메인 페이지에서 선택한 주차 사용
                 default_index = sidebar_weeks.index(st.session_state[main_week_select_key])
             elif sidebar_week_select_key in st.session_state and st.session_state[sidebar_week_select_key] in sidebar_weeks:
                 # 사이드바에서 이전에 선택한 주차 사용
                 default_index = sidebar_weeks.index(st.session_state[sidebar_week_select_key])
+            elif current_week_korean and current_week_korean in sidebar_weeks:
+                # 오늘 날짜 기준 주차 사용
+                default_index = sidebar_weeks.index(current_week_korean)
             else:
                 default_index = 0
             
@@ -465,79 +534,105 @@ if uploaded_file is not None:
                 index=default_index
             )
             
-            # 선택된 주차의 회의결과 메모 키
-            meeting_memo_key_sidebar = f"meeting_memo_{month_label_sidebar}_{selected_week_sidebar}"
+            # 주차별 경영진 회의록 입력 및 요약
+            st.sidebar.markdown("---")
+            st.sidebar.markdown("#### 📋 주차별 경영진 회의록")
+            
+            # 메인 페이지와 동일한 month_label 사용 (키 일치를 위해)
+            month_label_for_meeting = f"{selected_month}월" if selected_month is not None else "월"
+            
+            # 선택된 주차의 경영진 회의록 키
+            executive_meeting_key_sidebar = f"executive_meeting_{month_label_for_meeting}_{selected_week_sidebar}"
             
             # 주차별로 독립적인 session_state 키 사용 (주차가 변경되면 항상 파일에서 불러오기)
-            current_week_state_key_sidebar = f"current_week_sidebar_{meeting_memo_key_sidebar}"
-            if current_week_state_key_sidebar not in st.session_state or st.session_state.get(f"last_selected_week_sidebar_{month_label_sidebar}") != selected_week_sidebar:
+            current_week_state_key_executive = f"current_week_sidebar_executive_{executive_meeting_key_sidebar}"
+            if current_week_state_key_executive not in st.session_state or st.session_state.get(f"last_selected_week_sidebar_executive_{month_label_for_meeting}") != selected_week_sidebar:
                 # 주차가 변경되었거나 처음 로드하는 경우 파일에서 불러오기
-                loaded_memo_sidebar = load_memo_from_file(meeting_memo_key_sidebar)
-                st.session_state[meeting_memo_key_sidebar] = loaded_memo_sidebar if loaded_memo_sidebar else ""
-                st.session_state[current_week_state_key_sidebar] = True
-                st.session_state[f"last_selected_week_sidebar_{month_label_sidebar}"] = selected_week_sidebar
+                loaded_executive_meeting = load_memo_from_file(executive_meeting_key_sidebar)
+                if loaded_executive_meeting:
+                    st.session_state[executive_meeting_key_sidebar] = loaded_executive_meeting
+                else:
+                    if executive_meeting_key_sidebar not in st.session_state:
+                        st.session_state[executive_meeting_key_sidebar] = ""
+                st.session_state[current_week_state_key_executive] = True
+                st.session_state[f"last_selected_week_sidebar_executive_{month_label_for_meeting}"] = selected_week_sidebar
+            else:
+                # 주차가 변경되지 않았지만 파일에 최신 데이터가 있을 수 있으므로 확인
+                if executive_meeting_key_sidebar not in st.session_state or not st.session_state.get(executive_meeting_key_sidebar):
+                    loaded_executive_meeting = load_memo_from_file(executive_meeting_key_sidebar)
+                    if loaded_executive_meeting:
+                        st.session_state[executive_meeting_key_sidebar] = loaded_executive_meeting
             
-            # 회의결과 메모 입력
-            meeting_memo_text_sidebar = st.sidebar.text_area(
-                f"{selected_week_sidebar} 회의결과 및 경영자의견을 입력하세요",
-                value=st.session_state.get(meeting_memo_key_sidebar, ""),
-                height=200,
-                placeholder=f"{selected_week_sidebar} 회의결과 및 경영자의견을 작성하세요. 내용은 자동으로 저장됩니다.",
-                key=f"meeting_memo_input_sidebar_{month_label_sidebar}_{selected_week_sidebar}"
+            # 경영진 회의록 입력 (기존 내용이 표시되고, 추가 작성 시 하단에 이어짐)
+            current_executive_value = st.session_state.get(executive_meeting_key_sidebar, "")
+            
+            # 입력창의 키 (주차별로 고정되어 주차 변경 시 자동으로 새 입력창 생성)
+            executive_input_key = f"executive_meeting_input_sidebar_{month_label_for_meeting}_{selected_week_sidebar}"
+            
+            # 입력창이 처음 생성될 때만 기존 내용으로 초기화
+            executive_input_initial_value = current_executive_value
+            
+            # 입력창이 처음 생성될 때 파일에서 최신 내용 확인
+            if executive_input_key not in st.session_state:
+                latest_from_file = load_memo_from_file(executive_meeting_key_sidebar)
+                if latest_from_file:
+                    executive_input_initial_value = latest_from_file
+                    st.session_state[executive_meeting_key_sidebar] = latest_from_file
+                elif current_executive_value:
+                    executive_input_initial_value = current_executive_value
+                else:
+                    executive_input_initial_value = ""
+            
+            # 주차가 변경되지 않았을 때도 파일에서 최신 내용 확인 (다른 곳에서 저장된 경우 대비)
+            if st.session_state.get(f"last_selected_week_sidebar_executive_{month_label_for_meeting}") == selected_week_sidebar:
+                latest_from_file = load_memo_from_file(executive_meeting_key_sidebar)
+                if latest_from_file and latest_from_file != executive_input_initial_value:
+                    executive_input_initial_value = latest_from_file
+                    st.session_state[executive_meeting_key_sidebar] = latest_from_file
+            
+            # 입력창 생성 (입력창 생성 후에는 해당 키의 session_state 수정 불가)
+            if executive_input_key not in st.session_state:
+                st.session_state[executive_input_key] = executive_input_initial_value
+            
+            executive_meeting_text_sidebar = st.sidebar.text_area(
+                f"{selected_week_sidebar} 경영진 회의록을 입력하세요",
+                value=st.session_state.get(executive_input_key, executive_input_initial_value),
+                height=150,
+                placeholder=f"{selected_week_sidebar} 경영진 회의록을 작성하세요. 내용은 자동으로 저장됩니다.\n\n💡 기존 내용이 있으면 표시되며, 추가 작성 시 하단에 이어집니다.",
+                key=executive_input_key
             )
             
-            # 회의결과 메모 저장 (입력 시마다 자동 저장)
-            if meeting_memo_text_sidebar != st.session_state.get(meeting_memo_key_sidebar, ""):
-                st.session_state[meeting_memo_key_sidebar] = meeting_memo_text_sidebar
-                save_memo_to_file(meeting_memo_key_sidebar, meeting_memo_text_sidebar)
-                st.sidebar.success(f"✅ {selected_week_sidebar} 회의결과가 저장되었습니다.", icon="💾")
+            # 경영진 회의록 저장 (입력 시마다 자동 저장)
+            if executive_meeting_text_sidebar != st.session_state.get(executive_meeting_key_sidebar, ""):
+                # 입력창 내용을 그대로 저장 (사용자가 기존 내용을 포함하여 편집한 것으로 간주)
+                st.session_state[executive_meeting_key_sidebar] = executive_meeting_text_sidebar
+                save_memo_to_file(executive_meeting_key_sidebar, executive_meeting_text_sidebar)
+                st.sidebar.success(f"✅ {selected_week_sidebar} 경영진 회의록이 저장되었습니다.", icon="💾")
             
-            # 저장된 회의결과 메모 표시 (입력창과 별도로)
-            if st.session_state.get(meeting_memo_key_sidebar, ""):
-                with st.sidebar.expander(f"📋 저장된 {selected_week_sidebar} 회의결과 및 경영자의견 보기", expanded=False):
-                    meeting_memo_display_sidebar = st.session_state[meeting_memo_key_sidebar].replace('\n', '<br>')
-                    st.sidebar.markdown(meeting_memo_display_sidebar, unsafe_allow_html=True)
+            # 저장된 경영진 회의록 표시
+            if st.session_state.get(executive_meeting_key_sidebar, ""):
+                with st.sidebar.expander(f"📋 저장된 {selected_week_sidebar} 경영진 회의록 보기", expanded=False):
+                    executive_display = st.session_state[executive_meeting_key_sidebar].replace('\n', '<br>')
+                    st.sidebar.markdown(executive_display, unsafe_allow_html=True)
             
-            # 모든 주차별 회의결과 요약 보기
-            st.sidebar.markdown("---")
-            st.sidebar.markdown("#### 📊 주차별 회의결과 요약")
-            meeting_summary_sidebar = {}
-            for week in sidebar_weeks:
-                week_key = f"meeting_memo_{month_label_sidebar}_{week}"
-                # 파일에서 불러오기
-                loaded_week_memo = load_memo_from_file(week_key)
-                if loaded_week_memo:
-                    meeting_summary_sidebar[week] = loaded_week_memo
-                elif week_key in st.session_state and st.session_state[week_key]:
-                    meeting_summary_sidebar[week] = st.session_state[week_key]
-            
-            if meeting_summary_sidebar:
-                # 정렬된 주차 순서로 표시
-                for week in sidebar_weeks:
-                    if week in meeting_summary_sidebar:
-                        content = meeting_summary_sidebar[week]
-                        with st.sidebar.expander(f"📝 {week} 회의결과", expanded=False):
-                            week_display = content.replace('\n', '<br>')
-                            st.sidebar.markdown(week_display, unsafe_allow_html=True)
-            else:
-                st.sidebar.info("아직 작성된 주차별 회의결과가 없습니다.")
-            
-            # 주차별 경영진 회의록 요약 추가
+            # 모든 주차별 경영진 회의록 요약 보기
             st.sidebar.markdown("---")
             st.sidebar.markdown("#### 📋 주차별 경영진 회의록 요약")
             executive_meeting_summary = {}
+            
+            # 모든 주차의 회의록을 파일에서 불러와서 session_state에 저장 (요약 표시를 위해)
+            # 매번 파일에서 확인하여 최신 데이터 보장
             for week in sidebar_weeks:
-                week_key = f"executive_meeting_{month_label_sidebar}_{week}"
-                # session_state에 있으면 우선 사용 (최신 데이터), 없으면 파일에서 불러오기
-                if week_key in st.session_state and st.session_state[week_key]:
+                week_key = f"executive_meeting_{month_label_for_meeting}_{week}"
+                # 파일에서 불러오기 (항상 최신 데이터 확인)
+                loaded_executive_meeting = load_memo_from_file(week_key)
+                if loaded_executive_meeting:
+                    # 파일에 데이터가 있으면 session_state에 저장하고 요약에 추가
+                    st.session_state[week_key] = loaded_executive_meeting
+                    executive_meeting_summary[week] = loaded_executive_meeting
+                elif week_key in st.session_state and st.session_state[week_key]:
+                    # 파일에 없지만 session_state에 있으면 사용 (새로 작성 중인 경우)
                     executive_meeting_summary[week] = st.session_state[week_key]
-                else:
-                    # 파일에서 불러오기
-                    loaded_executive_meeting = load_memo_from_file(week_key)
-                    if loaded_executive_meeting:
-                        executive_meeting_summary[week] = loaded_executive_meeting
-                        # session_state에도 저장하여 다음에 빠르게 접근
-                        st.session_state[week_key] = loaded_executive_meeting
             
             if executive_meeting_summary:
                 # 정렬된 주차 순서로 표시
@@ -552,36 +647,8 @@ if uploaded_file is not None:
             else:
                 st.sidebar.info("아직 작성된 주차별 경영진 회의록이 없습니다.")
         else:
-            # 주차 정보가 없으면 월별로 표시
-            meeting_memo_key_sidebar = f"meeting_memo_{month_label_sidebar}"
-            # 파일에서 메모 불러오기
-            if meeting_memo_key_sidebar not in st.session_state:
-                loaded_memo_sidebar = load_memo_from_file(meeting_memo_key_sidebar)
-                if loaded_memo_sidebar:
-                    st.session_state[meeting_memo_key_sidebar] = loaded_memo_sidebar
-                else:
-                    st.session_state[meeting_memo_key_sidebar] = ""
-            
-            # 회의결과 메모 입력
-            meeting_memo_text_sidebar = st.sidebar.text_area(
-                "회의결과 및 경영자의견을 입력하세요",
-                value=st.session_state.get(meeting_memo_key_sidebar, ""),
-                height=200,
-                placeholder="회의결과 및 경영자의견을 작성하세요. 내용은 자동으로 저장됩니다.",
-                key=f"meeting_memo_input_sidebar_{month_label_sidebar}"
-            )
-            
-            # 회의결과 메모 저장 (입력 시마다 자동 저장)
-            if meeting_memo_text_sidebar != st.session_state.get(meeting_memo_key_sidebar, ""):
-                st.session_state[meeting_memo_key_sidebar] = meeting_memo_text_sidebar
-                save_memo_to_file(meeting_memo_key_sidebar, meeting_memo_text_sidebar)
-                st.sidebar.success("✅ 회의결과가 저장되었습니다.", icon="💾")
-            
-            # 저장된 회의결과 메모 표시 (입력창과 별도로)
-            if st.session_state.get(meeting_memo_key_sidebar, ""):
-                with st.sidebar.expander("📋 저장된 회의결과 및 경영자의견 보기", expanded=False):
-                    meeting_memo_display_sidebar = st.session_state[meeting_memo_key_sidebar].replace('\n', '<br>')
-                    st.sidebar.markdown(meeting_memo_display_sidebar, unsafe_allow_html=True)
+            # 주차 정보가 없으면 경영진 회의록만 표시
+            st.sidebar.info("주차 정보가 없어 주차별 경영진 회의록을 작성할 수 없습니다.")
         
         if '년' in df.columns:
             years = sorted(df['년'].dropna().unique())
@@ -890,19 +957,91 @@ if uploaded_file is not None:
                     return f"{month_label} {week_korean[relative_week]}주"
             return f"{month_label} {week_num}주"
         
+        # 주차별 날짜 범위 계산 함수 (지난주 금요일 ~ 이번주 목요일)
+        def get_week_date_range(week_num, month, min_week, year=None):
+            """주차 번호에 해당하는 날짜 범위 반환 (지난주 금요일 ~ 이번주 목요일)"""
+            if week_num is None or min_week is None:
+                return None, None
+            
+            # 년도가 없으면 현재 년도 또는 데이터에서 추출
+            if year is None:
+                if '년' in df.columns and len(df) > 0:
+                    year = int(df['년'].dropna().iloc[0]) if df['년'].notna().any() else 2024
+                else:
+                    year = 2024
+            
+            # 해당 월의 첫 번째 금요일 찾기
+            first_day_of_month = pd.Timestamp(year=year, month=month, day=1)
+            first_weekday = first_day_of_month.weekday()
+            
+            if first_weekday <= 4:  # 월~금
+                days_to_first_friday = 4 - first_weekday
+            else:  # 토~일
+                days_to_first_friday = 4 - first_weekday + 7
+            
+            first_friday = first_day_of_month + pd.Timedelta(days=days_to_first_friday)
+            
+            # 주차 번호에 해당하는 금요일 계산
+            relative_week = week_num - min_week
+            base_friday = first_friday + pd.Timedelta(days=relative_week * 7)
+            
+            # 해당 주차의 시작일 (금요일)과 종료일 (목요일)
+            start_date = base_friday  # 금요일
+            end_date = base_friday + pd.Timedelta(days=6)  # 목요일
+            
+            return start_date, end_date
+        
         # 주간별 또는 일별 트렌드 (날짜 컬럼이 있는 경우)
         if '년월' in df.columns or len(date_columns) > 0:
             if len(date_columns) > 0:
                 date_col = date_columns[0]
-                # 주간별 집계
-                df['주차'] = df[date_col].dt.isocalendar().week
+                # 주간별 집계 (지난주 금요일 ~ 이번주 목요일 기준)
+                df['주차'] = df[date_col].apply(get_custom_week)
                 df['일'] = df[date_col].dt.day
                 
                 # 선택된 월의 최소 주차 번호 찾기 (첫째주 기준)
-                min_week = df['주차'].min() if len(df) > 0 else None
+                min_week = df['주차'].min() if len(df) > 0 and df['주차'].notna().any() else None
                 
                 # 주차를 한국어로 변환
                 df['주차_한글'] = df['주차'].apply(lambda x: week_to_korean(x, min_week, selected_month))
+                
+                # 주차 산출 내역 표시
+                if min_week is not None and '주차_한글' in df.columns:
+                    st.markdown("#### 📅 주차 산출 내역")
+                    st.info("**산출 기준:** 지난주 금요일 ~ 이번주 목요일까지")
+                    
+                    # 고유한 주차 목록 가져오기
+                    unique_weeks = df[df['주차'].notna()]['주차'].unique()
+                    unique_weeks_sorted = sorted(unique_weeks)
+                    
+                    # 주차별 날짜 범위 표시
+                    week_info_list = []
+                    # 년도 추출
+                    year = None
+                    if '년' in df.columns and len(df) > 0:
+                        year = int(df['년'].dropna().iloc[0]) if df['년'].notna().any() else None
+                    
+                    for week_num in unique_weeks_sorted:
+                        week_korean = df[df['주차'] == week_num]['주차_한글'].iloc[0] if len(df[df['주차'] == week_num]) > 0 else f"{month_label} {week_num}주"
+                        start_date, end_date = get_week_date_range(week_num, selected_month, min_week, year)
+                        if start_date and end_date:
+                            # 요일을 한국어로 변환
+                            weekdays_kr = ['월', '화', '수', '목', '금', '토', '일']
+                            start_weekday_kr = weekdays_kr[start_date.weekday()]
+                            end_weekday_kr = weekdays_kr[end_date.weekday()]
+                            
+                            week_info_list.append({
+                                '주차': week_korean,
+                                '시작일': start_date.strftime('%Y-%m-%d') + f' ({start_weekday_kr})',
+                                '종료일': end_date.strftime('%Y-%m-%d') + f' ({end_weekday_kr})',
+                                '기간': f"{start_date.strftime('%m/%d')} ~ {end_date.strftime('%m/%d')}"
+                            })
+                    
+                    if week_info_list:
+                        week_info_df = pd.DataFrame(week_info_list)
+                        st.dataframe(week_info_df[['주차', '기간', '시작일', '종료일']], use_container_width=True, hide_index=True)
+                    
+                    st.markdown("---")
                 
                 col1, col2 = st.columns(2)
                 
@@ -1437,6 +1576,31 @@ if uploaded_file is not None:
         month_label = f"{selected_month}월" if selected_month is not None else "월"
         st.subheader(f"📋 플랫폼별 분석 ({month_label})")
         
+        # 파트 컬럼 확인 및 생성
+        part_col = None
+        part_columns = [col for col in df.columns if any(keyword in str(col).lower() for keyword in ['파트', 'part'])]
+        manager_columns = [col for col in df.columns 
+                          if any(keyword in str(col).lower() for keyword in ['담당자', 'manager', '담당', '담당인', 'contact', '담당자명'])]
+        
+        # 파트 컬럼이 없으면 담당자 컬럼에서 파트 생성
+        if not part_columns and manager_columns:
+            def manager_to_part(manager_name):
+                """담당자 이름을 파트로 변환"""
+                if pd.isna(manager_name):
+                    return '1파트'
+                manager_str = str(manager_name).strip()
+                # 맹기열 → 2파트
+                if '맹기열' in manager_str:
+                    return '2파트'
+                # 나머지 모든 담당자 → 1파트
+                return '1파트'
+            
+            manager_col_for_part = manager_columns[0]
+            df['파트'] = df[manager_col_for_part].apply(manager_to_part)
+            part_col = '파트'
+        elif part_columns:
+            part_col = part_columns[0]
+        
         # 텍스트/카테고리 컬럼 찾기
         category_columns = df.select_dtypes(include=['object']).columns.tolist()
         # 너무 많은 고유값을 가진 컬럼 제외 (ID나 설명 컬럼 제외)
@@ -1446,194 +1610,418 @@ if uploaded_file is not None:
         if len(category_columns) > 0:
             category_col = st.selectbox("분류 기준 선택", category_columns, key='category_select')
             
-            # 총 판매수량 분석 섹션 제목 추가
-            st.markdown("#### 📊 플랫폼별 총 판매수량 분석")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # 바 차트 (상위 10개)
-                category_data = df[category_col].value_counts().head(10)
+            # 파트별 분석 (1파트, 2파트)
+            if part_col and part_col in df.columns:
+                # 파트별 탭 생성
+                part_tabs_analysis = st.tabs(["1파트", "2파트", "전체"])
                 
-                # 플랫폼별 정렬 순서 지정 (부분 일치 허용)
-                priority_order = ['삼성베네포유', '삼성카드몰', '애터미아자', '캐시딜', '복지드림']
+                for tab_idx, part_name in enumerate(["1파트", "2파트", "전체"]):
+                    with part_tabs_analysis[tab_idx]:
+                        # 파트별 데이터 필터링
+                        if part_name == "전체":
+                            df_part = df.copy()
+                        else:
+                            df_part = df[df[part_col].astype(str).str.contains(part_name.replace('파트', ''), na=False, regex=False)]
+                        
+                        if len(df_part) == 0:
+                            st.info(f"{part_name} 데이터가 없습니다.")
+                            continue
+                        
+                        # 플랫폼별 판매수량과 매출이익금 통합 그래프
+                        st.markdown(f"#### 📊 {part_name} 플랫폼별 판매수량 및 매출이익금 분석")
+                        
+                        # 플랫폼별 판매수량 집계
+                        platform_qty = df_part.groupby(category_col).size().sort_values(ascending=False).head(10)
+                        
+                        # 플랫폼별 매출이익금 집계
+                        if amount_col and amount_col in df_part.columns:
+                            if df_part[amount_col].dtype == 'object':
+                                df_part[amount_col] = pd.to_numeric(df_part[amount_col], errors='coerce')
+                            platform_profit = df_part.groupby(category_col)[amount_col].sum().sort_values(ascending=False).head(10)
+                            
+                            # 공통 플랫폼 찾기
+                            common_platforms_set = set(platform_qty.index) & set(platform_profit.index)
+                            if len(common_platforms_set) > 0:
+                                # 매출이익금 기준으로 정렬 (높은 순서부터)
+                                common_platforms = sorted(
+                                    common_platforms_set,
+                                    key=lambda p: platform_profit.get(p, 0),
+                                    reverse=True
+                                )
+                                
+                                # 이중 Y축 그래프 생성
+                                from plotly.subplots import make_subplots
+                                fig_combined = make_subplots(specs=[[{"secondary_y": True}]])
+                                
+                                # 판매수량 바 차트 (왼쪽 Y축)
+                                fig_combined.add_trace(
+                                    go.Bar(
+                                        x=common_platforms,
+                                        y=[platform_qty.get(p, 0) for p in common_platforms],
+                                        name='판매수량',
+                                        marker_color='#87CEEB',
+                                        hovertemplate='<b>%{x}</b><br>판매수량: %{y}건<extra></extra>'
+                                    ),
+                                    secondary_y=False
+                                )
+                                
+                                # 매출이익금 라인 차트 (오른쪽 Y축)
+                                fig_combined.add_trace(
+                                    go.Scatter(
+                                        x=common_platforms,
+                                        y=[platform_profit.get(p, 0) for p in common_platforms],
+                                        name='매출이익금',
+                                        mode='lines+markers',
+                                        marker=dict(size=10, color='#32CD32'),
+                                        line=dict(width=3, color='#32CD32'),
+                                        hovertemplate='<b>%{x}</b><br>매출이익금: %{y:,.0f}원<extra></extra>'
+                                    ),
+                                    secondary_y=True
+                                )
+                                
+                                # 레이아웃 설정
+                                fig_combined.update_layout(
+                                    title=f'{part_name} 플랫폼별 판매수량 및 매출이익금 (상위 {len(common_platforms)}개)',
+                                    xaxis_title=category_col,
+                                    hovermode='x unified',
+                                    height=500,
+                                    # 그리드 라인 설정
+                                    xaxis=dict(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)'),
+                                    yaxis=dict(showgrid=True, gridwidth=1, gridcolor='rgba(128,128,128,0.2)'),
+                                    yaxis2=dict(showgrid=False)  # 오른쪽 Y축은 그리드 라인 제거
+                                )
+                                
+                                # Y축 설정
+                                fig_combined.update_yaxes(
+                                    title_text="판매수량 (건)",
+                                    secondary_y=False,
+                                    showgrid=True,
+                                    gridwidth=1,
+                                    gridcolor='rgba(128,128,128,0.2)',
+                                    nticks=6  # 눈금 개수 제한
+                                )
+                                fig_combined.update_yaxes(
+                                    title_text="매출이익금 (원)",
+                                    tickformat=',',
+                                    secondary_y=True,
+                                    showgrid=False,  # 오른쪽 Y축은 그리드 라인 제거
+                                    nticks=6  # 눈금 개수 제한
+                                )
+                                
+                                st.plotly_chart(fig_combined, use_container_width=True)
+                            else:
+                                st.warning("판매수량과 매출이익금 데이터가 있는 공통 플랫폼이 없습니다.")
+                        else:
+                            # 매출이익금이 없으면 판매수량만 표시
+                            st.markdown("#### 📊 플랫폼별 판매수량 분석")
+                            fig_qty = px.bar(
+                                x=platform_qty.index,
+                                y=platform_qty.values,
+                                title=f'{part_name} {category_col}별 판매수량 (상위 10개)',
+                                labels={'x': category_col, 'y': '판매수량 (건)'},
+                                color=platform_qty.values,
+                                color_continuous_scale='Blues'
+                            )
+                            fig_qty.update_layout(
+                                xaxis_title=category_col,
+                                yaxis_title="판매수량 (건)",
+                                showlegend=False
+                            )
+                            st.plotly_chart(fig_qty, use_container_width=True)
+            else:
+                # 파트 정보가 없으면 기존 방식으로 표시
+                st.markdown("#### 📊 플랫폼별 총 판매수량 분석")
                 
-                # 우선순위 플랫폼과 나머지 플랫폼 분리 (부분 일치로 찾기)
-                priority_platforms = []
-                other_platforms = []
+                col1, col2 = st.columns(2)
                 
-                # 실제 데이터의 플랫폼 이름과 우선순위 이름 매칭
-                for priority_name in priority_order:
+                with col1:
+                    # 바 차트 (상위 10개)
+                    category_data = df[category_col].value_counts().head(10)
+                    
+                    # 플랫폼별 정렬 순서 지정 (부분 일치 허용)
+                    priority_order = ['삼성베네포유', '삼성카드몰', '애터미아자', '캐시딜', '복지드림']
+                    
+                    # 우선순위 플랫폼과 나머지 플랫폼 분리 (부분 일치로 찾기)
+                    priority_platforms = []
+                    other_platforms = []
+                    
+                    # 실제 데이터의 플랫폼 이름과 우선순위 이름 매칭
+                    for priority_name in priority_order:
+                        for platform in category_data.index:
+                            if priority_name in str(platform) or str(platform) in priority_name:
+                                if platform not in priority_platforms:
+                                    priority_platforms.append(platform)
+                                    break
+                    
                     for platform in category_data.index:
-                        if priority_name in str(platform) or str(platform) in priority_name:
-                            if platform not in priority_platforms:
-                                priority_platforms.append(platform)
-                                break
-                
-                for platform in category_data.index:
-                    if platform not in priority_platforms:
-                        other_platforms.append(platform)
-                
-                # 우선순위 플랫폼을 먼저, 나머지는 판매수량 순으로 정렬
-                sorted_platforms = priority_platforms + sorted(other_platforms, key=lambda x: category_data[x], reverse=True)
-                
-                # 차트에서 상단에 우선순위 플랫폼이 오도록 역순으로 정렬
-                sorted_platforms_reversed = sorted_platforms[::-1]
-                
-                # 정렬된 순서대로 데이터 재구성
-                category_data_sorted = category_data.reindex(sorted_platforms_reversed)
-                
-                fig_bar = px.bar(
-                    x=category_data_sorted.values,
-                    y=category_data_sorted.index,
-                    orientation='h',
-                    title=f'{category_col}별 분포 (상위 10개)',
-                    labels={'x': '총 판매수량', 'y': category_col},
-                    color=category_data_sorted.values,
-                    color_continuous_scale='Viridis'
-                )
-                # Y축 순서를 반대로 설정하여 상단에 우선순위 플랫폼이 오도록
-                fig_bar.update_layout(
-                    showlegend=False,
-                    yaxis={'categoryorder': 'array', 'categoryarray': sorted_platforms_reversed}
-                )
-                # 툴팁에서 컬러 정보 숨기기
-                fig_bar.update_traces(
-                    hovertemplate=f'<b>%{{y}}</b><br>총 판매수량: %{{x}}<extra></extra>'
-                )
-                st.plotly_chart(fig_bar, use_container_width=True)
-            
-            with col2:
-                # 파이 차트 (상위 8개)
-                top_data = df[category_col].value_counts().head(8)
-                others_count = df[category_col].value_counts().iloc[8:].sum() if len(df[category_col].value_counts()) > 8 else 0
-                
-                if others_count > 0:
-                    top_data['기타'] = others_count
-                
-                fig_pie = px.pie(
-                    values=top_data.values,
-                    names=top_data.index,
-                    title=f'{category_col}별 비율',
-                    hole=0.4  # 도넛 차트 스타일
-                )
-                fig_pie.update_traces(textposition='inside', textinfo='percent+label')
-                st.plotly_chart(fig_pie, use_container_width=True)
-            
-            # 매출총이익 그래프 추가
-            if amount_col and amount_col in df.columns:
-                st.markdown("---")
-                st.markdown("#### 💰 플랫폼별 매출이익금 분석")
-                
-                # 매출총이익이 숫자형이 아니면 변환
-                if df[amount_col].dtype == 'object':
-                    df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce')
-                
-                # 플랫폼별 매출총이익 집계
-                platform_profit = df.groupby(category_col)[amount_col].sum().sort_values(ascending=False).head(10)
-                
-                col_profit1, col_profit2 = st.columns(2)
-                
-                with col_profit1:
-                    # 플랫폼별 매출이익금 바 차트 (세로)
-                    fig_profit_bar = px.bar(
-                        x=platform_profit.index,
-                        y=platform_profit.values,
-                        title=f'{category_col}별 매출이익금 (상위 10개)',
-                        labels={'x': category_col, 'y': '매출이익금 (원)'},
-                        color=platform_profit.values,
-                        color_continuous_scale='Greens'
+                        if platform not in priority_platforms:
+                            other_platforms.append(platform)
+                    
+                    # 우선순위 플랫폼을 먼저, 나머지는 판매수량 순으로 정렬
+                    sorted_platforms = priority_platforms + sorted(other_platforms, key=lambda x: category_data[x], reverse=True)
+                    
+                    # 차트에서 상단에 우선순위 플랫폼이 오도록 역순으로 정렬
+                    sorted_platforms_reversed = sorted_platforms[::-1]
+                    
+                    # 정렬된 순서대로 데이터 재구성
+                    category_data_sorted = category_data.reindex(sorted_platforms_reversed)
+                    
+                    fig_bar = px.bar(
+                        x=category_data_sorted.values,
+                        y=category_data_sorted.index,
+                        orientation='h',
+                        title=f'{category_col}별 분포 (상위 10개)',
+                        labels={'x': '총 판매수량', 'y': category_col},
+                        color=category_data_sorted.values,
+                        color_continuous_scale='Viridis'
                     )
-                    fig_profit_bar.update_layout(
-                        xaxis_title=category_col,
-                        yaxis_title="매출이익금 (원)",
+                    # Y축 순서를 반대로 설정하여 상단에 우선순위 플랫폼이 오도록
+                    fig_bar.update_layout(
                         showlegend=False,
-                        yaxis=dict(tickformat=',')
+                        yaxis={'categoryorder': 'array', 'categoryarray': sorted_platforms_reversed}
                     )
-                    # Y축 값에 천단위 구분 기호 적용
-                    fig_profit_bar.update_yaxes(tickformat=',')
                     # 툴팁에서 컬러 정보 숨기기
-                    fig_profit_bar.update_traces(
-                        hovertemplate=f'<b>%{{x}}</b><br>매출이익금: %{{y:,.0f}}원<extra></extra>'
+                    fig_bar.update_traces(
+                        hovertemplate=f'<b>%{{y}}</b><br>총 판매수량: %{{x}}<extra></extra>'
                     )
-                    st.plotly_chart(fig_profit_bar, use_container_width=True)
+                    st.plotly_chart(fig_bar, use_container_width=True)
                 
-                with col_profit2:
-                    # 플랫폼별 매출이익금 파이 차트
-                    top_profit = platform_profit.head(8)
-                    others_profit = platform_profit.iloc[8:].sum() if len(platform_profit) > 8 else 0
+                with col2:
+                    # 파이 차트 (상위 8개)
+                    top_data = df[category_col].value_counts().head(8)
+                    others_count = df[category_col].value_counts().iloc[8:].sum() if len(df[category_col].value_counts()) > 8 else 0
                     
-                    if others_profit > 0:
-                        top_profit = top_profit.copy()
-                        top_profit['기타'] = others_profit
+                    if others_count > 0:
+                        top_data['기타'] = others_count
                     
-                    fig_profit_pie = px.pie(
-                        values=top_profit.values,
-                        names=top_profit.index,
-                        title=f'{category_col}별 매출이익금 비율',
-                        hole=0.4
+                    fig_pie = px.pie(
+                        values=top_data.values,
+                        names=top_data.index,
+                        title=f'{category_col}별 비율',
+                        hole=0.4  # 도넛 차트 스타일
                     )
-                    fig_profit_pie.update_traces(
-                        textposition='inside',
-                        textinfo='percent+label',
-                        hovertemplate='<b>%{label}</b><br>매출이익금: %{value:,.0f}원<br>비율: %{percent}<extra></extra>'
-                    )
-                    st.plotly_chart(fig_profit_pie, use_container_width=True)
+                    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+                    st.plotly_chart(fig_pie, use_container_width=True)
+                
+                # 매출총이익 그래프 추가
+                if amount_col and amount_col in df.columns:
+                    st.markdown("---")
+                    st.markdown("#### 💰 플랫폼별 매출이익금 분석")
+                    
+                    # 매출총이익이 숫자형이 아니면 변환
+                    if df[amount_col].dtype == 'object':
+                        df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce')
+                    
+                    # 플랫폼별 매출총이익 집계
+                    platform_profit = df.groupby(category_col)[amount_col].sum().sort_values(ascending=False).head(10)
+                    
+                    col_profit1, col_profit2 = st.columns(2)
+                    
+                    with col_profit1:
+                        # 플랫폼별 매출이익금 바 차트 (세로)
+                        fig_profit_bar = px.bar(
+                            x=platform_profit.index,
+                            y=platform_profit.values,
+                            title=f'{category_col}별 매출이익금 (상위 10개)',
+                            labels={'x': category_col, 'y': '매출이익금 (원)'},
+                            color=platform_profit.values,
+                            color_continuous_scale='Greens'
+                        )
+                        fig_profit_bar.update_layout(
+                            xaxis_title=category_col,
+                            yaxis_title="매출이익금 (원)",
+                            showlegend=False,
+                            yaxis=dict(tickformat=',')
+                        )
+                        # Y축 값에 천단위 구분 기호 적용
+                        fig_profit_bar.update_yaxes(tickformat=',')
+                        # 툴팁에서 컬러 정보 숨기기
+                        fig_profit_bar.update_traces(
+                            hovertemplate=f'<b>%{{x}}</b><br>매출이익금: %{{y:,.0f}}원<extra></extra>'
+                        )
+                        st.plotly_chart(fig_profit_bar, use_container_width=True)
+                    
+                    with col_profit2:
+                        # 플랫폼별 매출이익금 파이 차트
+                        top_profit = platform_profit.head(8)
+                        others_profit = platform_profit.iloc[8:].sum() if len(platform_profit) > 8 else 0
+                        
+                        if others_profit > 0:
+                            top_profit = top_profit.copy()
+                            top_profit['기타'] = others_profit
+                        
+                        fig_profit_pie = px.pie(
+                            values=top_profit.values,
+                            names=top_profit.index,
+                            title=f'{category_col}별 매출이익금 비율',
+                            hole=0.4
+                        )
+                        fig_profit_pie.update_traces(
+                            textposition='inside',
+                            textinfo='percent+label',
+                            hovertemplate='<b>%{label}</b><br>매출이익금: %{value:,.0f}원<br>비율: %{percent}<extra></extra>'
+                        )
+                        st.plotly_chart(fig_profit_pie, use_container_width=True)
             
     
         
-        # 상세 데이터 테이블
-        month_label = f"{selected_month}월" if selected_month is not None else "월"
-        st.subheader(f"📋 {month_label} 상세 데이터")
+        # 상세 데이터 테이블 (숨김 처리)
+        # month_label = f"{selected_month}월" if selected_month is not None else "월"
+        # st.subheader(f"📋 {month_label} 상세 데이터")
+        # 
+        # # 검색 및 필터 기능
+        # col_search, col_filter = st.columns([3, 1])
+        # with col_search:
+        #     search_term = st.text_input("🔍 검색", "", placeholder="모든 컬럼에서 검색...")
+        # with col_filter:
+        #     show_rows = st.selectbox("표시 행 수", [50, 100, 200, 500, "전체"], index=1)
+        # 
+        # if search_term:
+        #     # 모든 컬럼에서 검색
+        #     mask = df.astype(str).apply(lambda x: x.str.contains(search_term, case=False, na=False)).any(axis=1)
+        #     display_df = df[mask]
+        #     st.info(f"검색 결과: {len(display_df)}건 발견")
+        # else:
+        #     display_df = df
+        # 
+        # # 행 수 제한
+        # if isinstance(show_rows, int) and len(display_df) > show_rows:
+        #     display_df = display_df.head(show_rows)
+        #     st.caption(f"상위 {show_rows}건만 표시 중 (전체: {len(df)}건)")
+        # 
+        # st.dataframe(display_df, use_container_width=True, height=400)
         
-        # 검색 및 필터 기능
-        col_search, col_filter = st.columns([3, 1])
-        with col_search:
-            search_term = st.text_input("🔍 검색", "", placeholder="모든 컬럼에서 검색...")
-        with col_filter:
-            show_rows = st.selectbox("표시 행 수", [50, 100, 200, 500, "전체"], index=1)
-        
-        if search_term:
-            # 모든 컬럼에서 검색
-            mask = df.astype(str).apply(lambda x: x.str.contains(search_term, case=False, na=False)).any(axis=1)
-            display_df = df[mask]
-            st.info(f"검색 결과: {len(display_df)}건 발견")
-        else:
-            display_df = df
-        
-        # 행 수 제한
-        if isinstance(show_rows, int) and len(display_df) > show_rows:
-            display_df = display_df.head(show_rows)
-            st.caption(f"상위 {show_rows}건만 표시 중 (전체: {len(df)}건)")
-        
-        st.dataframe(display_df, use_container_width=True, height=400)
-        
-        # 다운로드 버튼
+        # 핵심 매출 기여 상품 분석 (삼성베네포유 플랫폼 기준)
         st.markdown("---")
-        col1, col2 = st.columns(2)
+        st.markdown("#### 💎 핵심 매출 기여 상품 분석 (누적)")
         
-        with col1:
-            # CSV 다운로드
-            csv = display_df.to_csv(index=False).encode('utf-8-sig')
-            st.download_button(
-                label="📥 CSV 다운로드",
-                data=csv,
-                file_name=f"주간회의록_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv"
-            )
+        # A열 찾기 (플랫폼, 1번째 컬럼, 인덱스 0)
+        platform_col = None
+        if len(df.columns) > 0:
+            platform_col = df.columns[0]  # A열 (1번째 컬럼)
         
-        with col2:
-            # Excel 다운로드
-            from io import BytesIO
-            output = BytesIO()
-            with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                display_df.to_excel(writer, index=False, sheet_name='데이터')
-            st.download_button(
-                label="📥 Excel 다운로드",
-                data=output.getvalue(),
-                file_name=f"주간회의록_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+        # I열 찾기 (판매 수량, 9번째 컬럼, 인덱스 8)
+        i_column_index = 8  # I열은 9번째 (0-based index: 8)
+        sales_qty_col = None
+        if len(df.columns) > i_column_index:
+            sales_qty_col = df.columns[i_column_index]
+        
+        # 상품코드 컬럼 찾기 (일반적으로 C열 또는 D열 근처)
+        product_code_col = None
+        product_code_keywords = ['상품코드', 'product', 'code', '코드', '상품', '제품코드']
+        for idx, col in enumerate(df.columns):
+            col_str = str(col).lower()
+            if any(keyword in col_str for keyword in product_code_keywords) and '상품명' not in col_str:
+                product_code_col = col
+                break
+        
+        # 상품코드 컬럼을 찾지 못한 경우 C열(인덱스 2) 또는 D열(인덱스 3) 시도
+        if product_code_col is None:
+            if len(df.columns) > 2:
+                product_code_col = df.columns[2]  # C열
+            elif len(df.columns) > 3:
+                product_code_col = df.columns[3]  # D열
+        
+        if platform_col and sales_qty_col and product_code_col:
+            # 삼성베네포유 플랫폼 필터링
+            samsung_beneforyou_keywords = ['삼성베네포유', '베네포유', 'beneforyou', 'samsung']
+            df_samsung = df[df[platform_col].astype(str).str.contains('|'.join(samsung_beneforyou_keywords), case=False, na=False, regex=True)]
+            
+            if len(df_samsung) > 0:
+                # 판매수량이 숫자형이 아니면 변환
+                if df_samsung[sales_qty_col].dtype == 'object':
+                    df_samsung[sales_qty_col] = pd.to_numeric(df_samsung[sales_qty_col], errors='coerce')
+                
+                # 상품코드별 판매수량 집계 (판매가 많이 된 순서)
+                product_sales = df_samsung.groupby(product_code_col)[sales_qty_col].sum().reset_index()
+                product_sales.columns = ['상품코드', '판매수량']
+                product_sales = product_sales.sort_values('판매수량', ascending=False)  # 판매가 많이 된 순서
+                
+                # 업체명 컬럼 찾기
+                company_col = None
+                company_keywords = ['업체', '제조사', 'company', 'manufacturer', 'maker', '회사', '고객', 'customer', '제조업체']
+                for col in df.columns:
+                    col_str = str(col).lower()
+                    if any(keyword in col_str for keyword in company_keywords):
+                        company_col = col
+                        break
+                
+                # 업체명 컬럼을 찾지 못한 경우 B열(인덱스 1) 시도
+                if company_col is None and len(df.columns) > 1:
+                    company_col = df.columns[1]  # B열
+                
+                # 업체명 추가 (있는 경우)
+                if company_col:
+                    # 상품코드별 가장 많이 나타나는 업체명 사용
+                    company_mapping = df_samsung.groupby(product_code_col)[company_col].apply(lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.iloc[0]).to_dict()
+                    product_sales['업체명'] = product_sales['상품코드'].map(company_mapping)
+                    product_sales['업체명'] = product_sales['업체명'].fillna('미확인')
+                else:
+                    product_sales['업체명'] = '미확인'
+                
+                # 상품명 컬럼 찾기 (있는 경우)
+                product_name_col = None
+                product_name_keywords = ['상품명', 'product name', '품명', 'name', '제품명', '상품이름']
+                for col in df.columns:
+                    col_str = str(col).lower()
+                    if any(keyword in col_str for keyword in product_name_keywords):
+                        product_name_col = col
+                        break
+                
+                # 상품명 추가 (있는 경우)
+                if product_name_col:
+                    # 상품코드별 첫 번째 상품명 사용
+                    product_name_mapping = df_samsung.groupby(product_code_col)[product_name_col].first().to_dict()
+                    product_sales['상품명'] = product_sales['상품코드'].map(product_name_mapping)
+                    product_sales['상품명'] = product_sales['상품명'].fillna(product_sales['상품코드'])
+                    display_cols = ['업체명', '상품코드', '상품명', '판매수량']
+                else:
+                    display_cols = ['업체명', '상품코드', '판매수량']
+                
+                # 표시용 데이터 준비
+                product_sales_display = product_sales.copy()
+                product_sales_display['판매수량'] = product_sales_display['판매수량'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
+                
+                st.info(f"📊 삼성베네포유 플랫폼 기준 상품코드별 판매수량 분석 (총 {len(product_sales)}개 상품)")
+                st.dataframe(product_sales_display[display_cols], use_container_width=True, height=400, hide_index=True)
+            else:
+                st.warning("⚠️ 삼성베네포유 플랫폼 데이터를 찾을 수 없습니다.")
+        else:
+            missing_cols = []
+            if not platform_col:
+                missing_cols.append("플랫폼 컬럼(A열)")
+            if not sales_qty_col:
+                missing_cols.append("판매수량 컬럼(I열)")
+            if not product_code_col:
+                missing_cols.append("상품코드 컬럼")
+            st.warning(f"⚠️ {', '.join(missing_cols)}을(를) 찾을 수 없습니다.")
+        
+        # 다운로드 버튼 (숨김 처리)
+        # st.markdown("---")
+        # col1, col2 = st.columns(2)
+        # 
+        # with col1:
+        #     # CSV 다운로드
+        #     csv = display_df.to_csv(index=False).encode('utf-8-sig')
+        #     st.download_button(
+        #         label="📥 CSV 다운로드",
+        #         data=csv,
+        #         file_name=f"주간회의록_{datetime.now().strftime('%Y%m%d')}.csv",
+        #         mime="text/csv"
+        #     )
+        # 
+        # with col2:
+        #     # Excel 다운로드
+        #     from io import BytesIO
+        #     output = BytesIO()
+        #     with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        #         display_df.to_excel(writer, index=False, sheet_name='데이터')
+        #     st.download_button(
+        #         label="📥 Excel 다운로드",
+        #         data=output.getvalue(),
+        #         file_name=f"주간회의록_{datetime.now().strftime('%Y%m%d')}.xlsx",
+        #         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        #     )
         
         # 메모장 기능 추가 (파트별로 구분, 주차별 저장)
         st.markdown("---")
@@ -1982,130 +2370,142 @@ https://elsupervision.com/default/
                         memo_display_part2 = f"<div style='white-space: pre-wrap; font-family: inherit; line-height: 1.5; padding: 0.5rem;'>{memo_content}</div>"
                         st.markdown(memo_display_part2, unsafe_allow_html=True)
         
-        # 주차별 경영진 회의록 추가
-        st.markdown("---")
-        st.markdown(f"#### 📋 {month_label} 주차별 경영진 회의록")
-        
-        # 주차를 올바른 순서로 정렬하는 함수
-        def sort_weeks_korean(weeks):
-            """주차를 첫째주, 둘째주, 셋째주, 넷째주 순서로 정렬"""
-            week_order = {'첫째': 1, '둘째': 2, '셋째': 3, '넷째': 4, '다섯째': 5}
-            def get_week_number(week_str):
-                for key, value in week_order.items():
-                    if key in week_str:
-                        return value
-                return 999  # 알 수 없는 주차는 마지막에
-            return sorted(weeks, key=get_week_number)
-        
-        # 주차 정보가 있는 경우
-        if '주차_한글' in df.columns:
-            # 고유한 주차 목록 가져오기 (올바른 순서로 정렬)
-            unique_weeks = sort_weeks_korean(df['주차_한글'].unique().tolist())
-            
-            if len(unique_weeks) > 0:
-                # 사이드바와 메인 페이지 동기화를 위한 키 (selected_month를 직접 사용)
-                month_key = f"{selected_month}월" if selected_month is not None else "월"
-                sidebar_week_select_key = f"sidebar_week_select_{month_key}"
-                main_week_select_key = f"main_week_select_{month_key}"
-                
-                # 주차 선택 (사이드바와 메인 페이지 동기화)
-                # 사이드바에서 선택한 주차가 있으면 그것을 사용, 없으면 첫 번째 주차
-                if sidebar_week_select_key in st.session_state and st.session_state[sidebar_week_select_key] in unique_weeks:
-                    # 사이드바에서 선택한 주차 사용 (우선순위)
-                    default_index = unique_weeks.index(st.session_state[sidebar_week_select_key])
-                elif main_week_select_key in st.session_state and st.session_state[main_week_select_key] in unique_weeks:
-                    # 메인 페이지에서 이전에 선택한 주차 사용
-                    default_index = unique_weeks.index(st.session_state[main_week_select_key])
-                else:
-                    default_index = 0
-                
-                selected_week = st.selectbox("주차 선택", unique_weeks, key=main_week_select_key, index=default_index)
-                
-                # 선택된 주차의 회의록 키
-                meeting_key = f"executive_meeting_{month_label}_{selected_week}"
-                
-                # 주차별로 독립적인 session_state 키 사용 (주차가 변경되면 항상 파일에서 불러오기)
-                current_week_state_key = f"current_week_{meeting_key}"
-                if current_week_state_key not in st.session_state or st.session_state.get(f"last_selected_week_{month_label}") != selected_week:
-                    # 주차가 변경되었거나 처음 로드하는 경우 파일에서 불러오기
-                    loaded_meeting = load_memo_from_file(meeting_key)
-                    st.session_state[meeting_key] = loaded_meeting if loaded_meeting else ""
-                    st.session_state[current_week_state_key] = True
-                    st.session_state[f"last_selected_week_{month_label}"] = selected_week
-                
-                # 주차별 경영진 회의록 입력
-                meeting_text = st.text_area(
-                    f"{selected_week} 경영진 회의록을 입력하세요",
-                    value=st.session_state.get(meeting_key, ""),
-                    height=200,
-                    placeholder=f"{selected_week} 경영진 회의록을 작성하세요. 내용은 자동으로 저장됩니다.",
-                    key=f"meeting_input_{month_label}_{selected_week}"
-                )
-                
-                # 회의록 저장 (입력 시마다 자동 저장)
-                if meeting_text != st.session_state.get(meeting_key, ""):
-                    st.session_state[meeting_key] = meeting_text
-                    save_memo_to_file(meeting_key, meeting_text)
-                    st.success(f"✅ {selected_week} 경영진 회의록이 저장되었습니다.", icon="💾")
-                
-                # 저장된 회의록 표시
-                if st.session_state[meeting_key]:
-                    with st.expander(f"📋 저장된 {selected_week} 경영진 회의록 보기", expanded=False):
-                        meeting_display = st.session_state[meeting_key].replace('\n', '<br>')
-                        st.markdown(meeting_display, unsafe_allow_html=True)
-                
-                # 모든 주차별 회의록 요약 보기
-                st.markdown("---")
-                st.markdown("#### 📊 주차별 회의록 요약")
-                meeting_summary = {}
-                for week in unique_weeks:
-                    week_key = f"executive_meeting_{month_label}_{week}"
-                    # session_state에 있으면 우선 사용 (최신 데이터), 없으면 파일에서 불러오기
-                    if week_key in st.session_state and st.session_state[week_key]:
-                        meeting_summary[week] = st.session_state[week_key]
-                    else:
-                        # 파일에서 불러오기
-                        loaded_week_meeting = load_memo_from_file(week_key)
-                        if loaded_week_meeting:
-                            meeting_summary[week] = loaded_week_meeting
-                            # session_state에도 저장하여 다음에 빠르게 접근
-                            st.session_state[week_key] = loaded_week_meeting
-                
-                # 선택된 주차를 추적하여 주차 변경 시 자동으로 열리도록 함
-                summary_selected_week_key = f"summary_selected_week_{month_label}"
-                if summary_selected_week_key not in st.session_state:
-                    st.session_state[summary_selected_week_key] = selected_week
-                
-                # 주차가 변경되었는지 확인
-                week_changed = st.session_state[summary_selected_week_key] != selected_week
-                if week_changed:
-                    st.session_state[summary_selected_week_key] = selected_week
-                
-                if meeting_summary:
-                    # 선택된 주차의 회의록을 먼저 표시하고 자동으로 열기
-                    # 주차가 변경되었거나 처음 로드하는 경우 expanded=True
-                    if selected_week in meeting_summary:
-                        content = meeting_summary[selected_week]
-                        # 선택된 주차는 항상 expanded=True (주차 변경 시 자동으로 열림)
-                        with st.expander(f"📝 {selected_week} 회의록", expanded=True):
-                            week_display = content.replace('\n', '<br>')
-                            st.markdown(week_display, unsafe_allow_html=True)
-                    
-                    # 나머지 주차의 회의록 표시 (선택된 주차 제외)
-                    # 정렬된 순서로 표시하되, 선택된 주차는 제외
-                    for week in unique_weeks:
-                        if week in meeting_summary and week != selected_week:
-                            content = meeting_summary[week]
-                            # 선택되지 않은 주차는 expanded=False
-                            with st.expander(f"📝 {week} 회의록", expanded=False):
-                                week_display = content.replace('\n', '<br>')
-                                st.markdown(week_display, unsafe_allow_html=True)
-                else:
-                    st.info("아직 작성된 주차별 회의록이 없습니다.")
-            else:
-                st.info("주차 정보를 찾을 수 없습니다.")
-        else:
-            st.info("주차 정보가 없어 주차별 회의록을 작성할 수 없습니다. 날짜 정보가 포함된 데이터를 업로드해주세요.")
+        # 주차별 경영진 회의록 추가 (숨김 처리)
+        # st.markdown("---")
+        # st.markdown(f"#### 📋 {month_label} 주차별 경영진 회의록")
+        # 
+        # # 주차를 올바른 순서로 정렬하는 함수
+        # def sort_weeks_korean(weeks):
+        #     """주차를 첫째주, 둘째주, 셋째주, 넷째주 순서로 정렬"""
+        #     week_order = {'첫째': 1, '둘째': 2, '셋째': 3, '넷째': 4, '다섯째': 5}
+        #     def get_week_number(week_str):
+        #         for key, value in week_order.items():
+        #             if key in week_str:
+        #                 return value
+        #         return 999  # 알 수 없는 주차는 마지막에
+        #     return sorted(weeks, key=get_week_number)
+        # 
+        # # 주차 정보가 있는 경우
+        # if '주차_한글' in df.columns:
+        #     # 고유한 주차 목록 가져오기 (올바른 순서로 정렬)
+        #     unique_weeks = sort_weeks_korean(df['주차_한글'].unique().tolist())
+        #     
+        #     if len(unique_weeks) > 0:
+        #         # 사이드바와 메인 페이지 동기화를 위한 키 (selected_month를 직접 사용)
+        #         month_key = f"{selected_month}월" if selected_month is not None else "월"
+        #         sidebar_week_select_key = f"sidebar_week_select_{month_key}"
+        #         main_week_select_key = f"main_week_select_{month_key}"
+        #         
+        #         # 주차 선택 (사이드바와 메인 페이지 동기화)
+        #         # 사이드바에서 선택한 주차가 있으면 그것을 사용, 없으면 첫 번째 주차
+        #         if sidebar_week_select_key in st.session_state and st.session_state[sidebar_week_select_key] in unique_weeks:
+        #             # 사이드바에서 선택한 주차 사용 (우선순위)
+        #             default_index = unique_weeks.index(st.session_state[sidebar_week_select_key])
+        #         elif main_week_select_key in st.session_state and st.session_state[main_week_select_key] in unique_weeks:
+        #             # 메인 페이지에서 이전에 선택한 주차 사용
+        #             default_index = unique_weeks.index(st.session_state[main_week_select_key])
+        #         else:
+        #             default_index = 0
+        #         
+        #         selected_week = st.selectbox("주차 선택", unique_weeks, key=main_week_select_key, index=default_index)
+        #         
+        #         # 모든 주차의 회의록을 미리 파일에서 불러와서 session_state에 저장 (요약 표시를 위해)
+        #         all_weeks_loaded_key = f"all_weeks_loaded_{month_label}"
+        #         if all_weeks_loaded_key not in st.session_state:
+        #             for week in unique_weeks:
+        #                 week_key = f"executive_meeting_{month_label}_{week}"
+        #                 # session_state에 없으면 파일에서 불러오기
+        #                 if week_key not in st.session_state or not st.session_state.get(week_key):
+        #                     loaded_week_meeting = load_memo_from_file(week_key)
+        #                     if loaded_week_meeting:
+        #                         st.session_state[week_key] = loaded_week_meeting
+        #             st.session_state[all_weeks_loaded_key] = True
+        #         
+        #         # 선택된 주차의 회의록 키
+        #         meeting_key = f"executive_meeting_{month_label}_{selected_week}"
+        #         
+        #         # 주차별로 독립적인 session_state 키 사용 (주차가 변경되면 항상 파일에서 불러오기)
+        #         current_week_state_key = f"current_week_{meeting_key}"
+        #         if current_week_state_key not in st.session_state or st.session_state.get(f"last_selected_week_{month_label}") != selected_week:
+        #             # 주차가 변경되었거나 처음 로드하는 경우 파일에서 불러오기
+        #             loaded_meeting = load_memo_from_file(meeting_key)
+        #             st.session_state[meeting_key] = loaded_meeting if loaded_meeting else ""
+        #             st.session_state[current_week_state_key] = True
+        #             st.session_state[f"last_selected_week_{month_label}"] = selected_week
+        #         
+        #         # 주차별 경영진 회의록 입력
+        #         meeting_text = st.text_area(
+        #             f"{selected_week} 경영진 회의록을 입력하세요",
+        #             value=st.session_state.get(meeting_key, ""),
+        #             height=200,
+        #             placeholder=f"{selected_week} 경영진 회의록을 작성하세요. 내용은 자동으로 저장됩니다.",
+        #             key=f"meeting_input_{month_label}_{selected_week}"
+        #         )
+        #         
+        #         # 회의록 저장 (입력 시마다 자동 저장)
+        #         if meeting_text != st.session_state.get(meeting_key, ""):
+        #             st.session_state[meeting_key] = meeting_text
+        #             save_memo_to_file(meeting_key, meeting_text)
+        #             st.success(f"✅ {selected_week} 경영진 회의록이 저장되었습니다.", icon="💾")
+        #         
+        #         # 저장된 회의록 표시
+        #         if st.session_state[meeting_key]:
+        #             with st.expander(f"📋 저장된 {selected_week} 경영진 회의록 보기", expanded=False):
+        #                 meeting_display = st.session_state[meeting_key].replace('\n', '<br>')
+        #                 st.markdown(meeting_display, unsafe_allow_html=True)
+        #         
+        #         # 모든 주차별 회의록 요약 보기
+        #         st.markdown("---")
+        #         st.markdown("#### 📊 주차별 회의록 요약")
+        #         meeting_summary = {}
+        #         for week in unique_weeks:
+        #             week_key = f"executive_meeting_{month_label}_{week}"
+        #             # session_state에 있으면 우선 사용 (최신 데이터), 없으면 파일에서 불러오기
+        #             if week_key in st.session_state and st.session_state[week_key]:
+        #                 meeting_summary[week] = st.session_state[week_key]
+        #             else:
+        #                 # 파일에서 불러오기
+        #                 loaded_week_meeting = load_memo_from_file(week_key)
+        #                 if loaded_week_meeting:
+        #                     meeting_summary[week] = loaded_week_meeting
+        #                     # session_state에도 저장하여 다음에 빠르게 접근
+        #                     st.session_state[week_key] = loaded_week_meeting
+        #         
+        #         # 선택된 주차를 추적하여 주차 변경 시 자동으로 열리도록 함
+        #         summary_selected_week_key = f"summary_selected_week_{month_label}"
+        #         if summary_selected_week_key not in st.session_state:
+        #             st.session_state[summary_selected_week_key] = selected_week
+        #         
+        #         # 주차가 변경되었는지 확인
+        #         week_changed = st.session_state[summary_selected_week_key] != selected_week
+        #         if week_changed:
+        #             st.session_state[summary_selected_week_key] = selected_week
+        #         
+        #         if meeting_summary:
+        #             # 선택된 주차의 회의록을 먼저 표시하고 자동으로 열기
+        #             # 주차가 변경되었거나 처음 로드하는 경우 expanded=True
+        #             if selected_week in meeting_summary:
+        #                 content = meeting_summary[selected_week]
+        #                 # 선택된 주차는 항상 expanded=True (주차 변경 시 자동으로 열림)
+        #                 with st.expander(f"📝 {selected_week} 회의록", expanded=True):
+        #                     week_display = content.replace('\n', '<br>')
+        #                     st.markdown(week_display, unsafe_allow_html=True)
+        #             
+        #             # 나머지 주차의 회의록 표시 (선택된 주차 제외)
+        #             # 정렬된 순서로 표시하되, 선택된 주차는 제외
+        #             for week in unique_weeks:
+        #                 if week in meeting_summary and week != selected_week:
+        #                     content = meeting_summary[week]
+        #                     # 선택되지 않은 주차는 expanded=False
+        #                     with st.expander(f"📝 {week} 회의록", expanded=False):
+        #                         week_display = content.replace('\n', '<br>')
+        #                         st.markdown(week_display, unsafe_allow_html=True)
+        #         else:
+        #             st.info("아직 작성된 주차별 회의록이 없습니다.")
+        #     else:
+        #         st.info("주차 정보를 찾을 수 없습니다.")
+        # else:
+        #     st.info("주차 정보가 없어 주차별 회의록을 작성할 수 없습니다. 날짜 정보가 포함된 데이터를 업로드해주세요.")
         
         # 판매 데이터 분석 섹션 추가 (선택된 월 상세 데이터 하단) - 숨김
         if False and os.path.exists(sales_data_path):
