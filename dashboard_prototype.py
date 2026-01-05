@@ -169,28 +169,52 @@ if uploaded_file is not None:
         # 시트 목록 확인
         sheet_names = xls.sheet_names
         
-        # 11월 및 12월 시트 자동 찾기
+        # 현재 날짜 확인
+        today = pd.Timestamp.now()
+        current_month = today.month
+        current_year = today.year
+        
+        # 1월 시트, 11월 및 12월 시트 자동 찾기
+        january_sheet = None
         november_sheet = None
         december_sheet = None
         for sheet in sheet_names:
-            if '11월' in sheet or ('11' in sheet and '월' in sheet) or 'november' in sheet.lower() or 'nov' in sheet.lower():
+            sheet_lower = sheet.lower()
+            # 2026년 1월 또는 1월 시트 찾기 (11월, 12월과 구분)
+            if (('2026' in sheet and '1월' in sheet) or 
+                ('1월' in sheet and '11' not in sheet and '12' not in sheet) or
+                ('january' in sheet_lower or 'jan' in sheet_lower) and 'nov' not in sheet_lower and 'dec' not in sheet_lower):
+                january_sheet = sheet
+            if '11월' in sheet or ('11' in sheet and '월' in sheet) or 'november' in sheet_lower or 'nov' in sheet_lower:
                 november_sheet = sheet
-            if '12월' in sheet or ('12' in sheet and '월' in sheet) or 'december' in sheet.lower() or 'dec' in sheet.lower():
+            if '12월' in sheet or ('12' in sheet and '월' in sheet) or 'december' in sheet_lower or 'dec' in sheet_lower:
                 december_sheet = sheet
         
-        # 시트 선택 (12월 시트가 있으면 기본값으로 설정, 없으면 11월 시트)
-        default_sheet = december_sheet if december_sheet else november_sheet
+        # 시트 선택 기본값 설정
+        # 오늘이 1월이면 1월 시트를 우선, 아니면 12월 → 11월 순서
+        if current_month == 1 and january_sheet:
+            default_sheet = january_sheet
+        elif december_sheet:
+            default_sheet = december_sheet
+        else:
+            default_sheet = november_sheet
+        
         if default_sheet:
             selected_sheet = st.selectbox("시트 선택", sheet_names, index=sheet_names.index(default_sheet))
         else:
             selected_sheet = st.selectbox("시트 선택", sheet_names)
-            st.info("💡 12월 또는 11월 시트를 찾지 못했습니다. 시트 이름에 '12월', '11월' 또는 '12', '11'이 포함되어 있는지 확인하세요.")
+            if current_month == 1:
+                st.info("💡 1월 시트를 찾지 못했습니다. 시트 이름에 '2026년 1월', '1월' 또는 'january', 'jan'이 포함되어 있는지 확인하세요.")
+            else:
+                st.info("💡 12월 또는 11월 시트를 찾지 못했습니다. 시트 이름에 '12월', '11월' 또는 '12', '11'이 포함되어 있는지 확인하세요.")
         
         df = pd.read_excel(xls, sheet_name=selected_sheet)
         
         # 선택된 시트에서 월 정보 추출
         selected_month = None
-        if '12월' in selected_sheet or ('12' in selected_sheet and '월' in selected_sheet):
+        if '1월' in selected_sheet and '11' not in selected_sheet and '12' not in selected_sheet:
+            selected_month = 1
+        elif '12월' in selected_sheet or ('12' in selected_sheet and '월' in selected_sheet):
             selected_month = 12
         elif '11월' in selected_sheet or ('11' in selected_sheet and '월' in selected_sheet):
             selected_month = 11
