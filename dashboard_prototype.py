@@ -759,9 +759,72 @@ if uploaded_file is not None:
                 month_label = "월"
             st.subheader(f"🎯 {month_label} 목표 달성 현황")
             
-            # 목표 설정
-            target_part1 = 17000000  # 1파트 목표: 17,000,000원
-            target_part2 = 1000000   # 2파트 목표: 1,000,000원
+            # 목표 설정 (년도별, 월별)
+            # 2025년도 목표액 (기본값)
+            target_part1_2025 = 17000000  # 1파트 목표: 17,000,000원
+            target_part2_2025 = 1000000   # 2파트 목표: 1,000,000원
+            
+            # 2026년도 1파트 월별 목표액
+            target_part1_2026_monthly = {
+                1: 32000000,   # 1월: 32,000,000원
+                2: 40000000,   # 2월: 40,000,000원
+                3: 44000000,   # 3월: 44,000,000원
+                4: 32000000,   # 4월: 32,000,000원
+                5: 40000000,   # 5월: 40,000,000원
+                6: 29000000,   # 6월: 29,000,000원
+                7: 33000000,   # 7월: 33,000,000원
+                8: 36000000,   # 8월: 36,000,000원
+                9: 40000000,   # 9월: 40,000,000원
+                10: 29000000,  # 10월: 29,000,000원
+                11: 24000000,  # 11월: 24,000,000원
+                12: 24000000   # 12월: 24,000,000원
+            }
+            
+            # 2026년도 2파트 월별 목표액
+            target_part2_2026_monthly = {
+                1: 2000000,   # 1월: 2,000,000원
+                2: 2000000,   # 2월: 2,000,000원
+                3: 2000000,   # 3월: 2,000,000원
+                4: 4000000,   # 4월: 4,000,000원
+                5: 5000000,   # 5월: 5,000,000원
+                6: 5000000,   # 6월: 5,000,000원
+                7: 6000000,   # 7월: 6,000,000원
+                8: 7000000,   # 8월: 7,000,000원
+                9: 11000000,  # 9월: 11,000,000원
+                10: 9000000,  # 10월: 9,000,000원
+                11: 8000000,  # 11월: 8,000,000원
+                12: 9000000   # 12월: 9,000,000원
+            }
+            
+            # 년도 추출
+            year = None
+            if '년' in df.columns and len(df) > 0:
+                unique_years = sorted(df['년'].dropna().unique())
+                if len(unique_years) == 1:
+                    year = int(unique_years[0])
+                elif len(selected_years) == 1:
+                    year = int(selected_years[0])
+            
+            # 월 추출
+            month_num = None
+            if selected_month is not None:
+                month_num = selected_month
+            elif len(df) > 0 and '월' in df.columns:
+                unique_months = sorted(df['월'].dropna().unique())
+                if len(unique_months) == 1:
+                    month_num = int(unique_months[0])
+                elif len(selected_months) == 1:
+                    month_num = int(selected_months[0])
+            
+            # 년도와 월에 따라 목표액 설정
+            if year == 2026 and month_num is not None:
+                # 2026년도: 월별 목표액 사용
+                target_part1 = target_part1_2026_monthly.get(month_num, target_part1_2025)
+                target_part2 = target_part2_2026_monthly.get(month_num, target_part2_2025)
+            else:
+                # 2025년도 또는 년도/월 정보가 없는 경우: 기본값 사용
+                target_part1 = target_part1_2025
+                target_part2 = target_part2_2025
             
             # N열 찾기 (엑셀의 N열 = 14번째 컬럼, 인덱스 13)
         # 방법 1: 컬럼 인덱스로 N열 찾기 (14번째 컬럼)
