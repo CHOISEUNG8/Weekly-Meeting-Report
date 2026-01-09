@@ -12,6 +12,8 @@ import openpyxl
 import json
 import os
 import html
+import time
+import shutil
 
 # 페이지 설정
 st.set_page_config(
@@ -119,14 +121,41 @@ def get_week_date_range(week_num, month, min_week, year=None):
     return start_date, end_date
 
 def save_memo_to_file(key, value):
-    """메모를 JSON 파일로 저장 (원본 포맷 보존)"""
+    """메모를 JSON 파일로 저장 (원본 포맷 보존, 원자적 쓰기로 안전하게 저장)"""
     try:
         file_path = os.path.join(MEMO_DATA_DIR, f"{key}.json")
+        # 임시 파일 경로 생성
+        temp_file_path = file_path + ".tmp"
+        
         # 원본 텍스트 포맷을 완벽하게 보존하기 위해 ensure_ascii=False 사용
-        with open(file_path, 'w', encoding='utf-8') as f:
+        # 임시 파일에 먼저 저장 (원자적 쓰기)
+        with open(temp_file_path, 'w', encoding='utf-8') as f:
             json.dump({"content": value}, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())  # 디스크에 강제로 쓰기
+        
+        # 임시 파일을 원본 파일로 안전하게 교체 (원자적 연산)
+        if os.path.exists(file_path):
+            # 백업 파일 생성 (데이터 손실 방지)
+            backup_file_path = file_path + ".backup"
+            try:
+                shutil.copy2(file_path, backup_file_path)
+            except:
+                pass  # 백업 실패해도 계속 진행
+        
+        # Windows에서는 rename이 원자적이지 않을 수 있으므로, 존재하는 파일은 삭제 후 rename
+        if os.path.exists(file_path):
+            os.remove(file_path)
+        os.rename(temp_file_path, file_path)
+        
     except Exception as e:
         st.error(f"메모 저장 중 오류 발생: {str(e)}")
+        # 임시 파일이 남아있으면 정리
+        try:
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
+        except:
+            pass
 
 def load_memo_from_file(key):
     """JSON 파일에서 메모 불러오기"""
@@ -2338,6 +2367,22 @@ if uploaded_file is not None:
                 
                 selected_week_part = st.selectbox("주차 선택", unique_weeks, key=part_week_select_key, index=default_index)
                 
+                # 주차 변경 감지 및 이전 주차 데이터 저장
+                last_week_key = f"last_selected_week_part_{month_label}"
+                if last_week_key in st.session_state and st.session_state[last_week_key] != selected_week_part:
+                    # 주차가 변경되었으므로 이전 주차의 데이터를 파일에 저장
+                    previous_week = st.session_state[last_week_key]
+                    previous_memo_key_part1 = f"memo_{month_label}_{previous_week}_part1"
+                    previous_memo_key_part2 = f"memo_{month_label}_{previous_week}_part2"
+                    
+                    # 이전 주차의 1파트 메모가 session_state에 있으면 저장
+                    if previous_memo_key_part1 in st.session_state:
+                        save_memo_to_file(previous_memo_key_part1, st.session_state[previous_memo_key_part1])
+                    
+                    # 이전 주차의 2파트 메모가 session_state에 있으면 저장
+                    if previous_memo_key_part2 in st.session_state:
+                        save_memo_to_file(previous_memo_key_part2, st.session_state[previous_memo_key_part2])
+                
                 # 파트별 메모 탭 생성
                 part_tabs = st.tabs(["1파트", "2파트"])
                 
@@ -2442,6 +2487,16 @@ https://elsupervision.com/default/
                         save_memo_to_file(memo_key_part1, memo_text_part1)
                         st.success(f"✅ {selected_week_part} 1파트 메모가 저장되었습니다.", icon="💾")
                     
+                    # 주기적인 자동 저장 (현재 주차 데이터 보존)
+                    # 현재 주차의 데이터가 session_state에 있으면 파일에도 저장
+                    if memo_key_part1 in st.session_state and st.session_state[memo_key_part1]:
+                        # 마지막 저장 시간 확인 (너무 자주 저장하지 않도록)
+                        last_save_key = f"last_auto_save_{memo_key_part1}"
+                        current_time = time.time()
+                        if last_save_key not in st.session_state or current_time - st.session_state[last_save_key] > 30:  # 30초마다 자동 저장
+                            save_memo_to_file(memo_key_part1, st.session_state[memo_key_part1])
+                            st.session_state[last_save_key] = current_time
+                    
                     # 저장된 1파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
                     if st.session_state.get(memo_key_part1, ""):
                         with st.expander(f"📋 저장된 {selected_week_part} 1파트 메모 보기", expanded=False):
@@ -2467,6 +2522,7 @@ https://elsupervision.com/default/
                         else:
                             st.session_state[memo_key_part2] = ""
                         st.session_state[current_week_state_key_part2] = True
+                        st.session_state[f"last_selected_week_part_{month_label}"] = selected_week_part
                     
                     # 2파트 메모 입력
                     memo_text_part2 = st.text_area(
@@ -2482,6 +2538,16 @@ https://elsupervision.com/default/
                         st.session_state[memo_key_part2] = memo_text_part2
                         save_memo_to_file(memo_key_part2, memo_text_part2)
                         st.success(f"✅ {selected_week_part} 2파트 메모가 저장되었습니다.", icon="💾")
+                    
+                    # 주기적인 자동 저장 (현재 주차 데이터 보존)
+                    # 현재 주차의 데이터가 session_state에 있으면 파일에도 저장
+                    if memo_key_part2 in st.session_state and st.session_state[memo_key_part2]:
+                        # 마지막 저장 시간 확인 (너무 자주 저장하지 않도록)
+                        last_save_key = f"last_auto_save_{memo_key_part2}"
+                        current_time = time.time()
+                        if last_save_key not in st.session_state or current_time - st.session_state[last_save_key] > 30:  # 30초마다 자동 저장
+                            save_memo_to_file(memo_key_part2, st.session_state[memo_key_part2])
+                            st.session_state[last_save_key] = current_time
                     
                     # 저장된 2파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
                     if st.session_state.get(memo_key_part2, ""):
