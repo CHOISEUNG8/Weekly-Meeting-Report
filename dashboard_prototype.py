@@ -1373,7 +1373,8 @@ if uploaded_file is not None:
                             title_text="매출이익금 (원)",
                             secondary_y=True,
                             tickformat=',',
-                            showgrid=False  # 오른쪽 Y축 그리드선 비활성화
+                            showgrid=False,  # 오른쪽 Y축 그리드선 비활성화
+                            showticklabels=False  # 보조 Y축 눈금선 제거
                         )
                         # month_label 설정: selected_month가 있으면 사용, 없으면 필터링된 데이터에서 월 추출
                         if selected_month is not None:
@@ -1512,7 +1513,8 @@ if uploaded_file is not None:
                             title_text="매출이익금 (원)",
                             secondary_y=True,
                             tickformat=',',
-                            showgrid=False  # 오른쪽 Y축 그리드선 비활성화
+                            showgrid=False,  # 오른쪽 Y축 그리드선 비활성화
+                            showticklabels=False  # 보조 Y축 눈금선 제거
                         )
                         # month_label 설정: selected_month가 있으면 사용, 없으면 필터링된 데이터에서 월 추출
                         if selected_month is not None:
@@ -1922,28 +1924,45 @@ if uploaded_file is not None:
                                 from plotly.subplots import make_subplots
                                 fig_combined = make_subplots(specs=[[{"secondary_y": True}]])
                                 
-                                # 판매수량 바 차트 (왼쪽 Y축)
+                                # 삼성베네포유 플랫폼 확인
+                                samsung_keywords = ['삼성베네포유', '베네포유', 'beneforyou', 'samsung']
+                                samsung_platforms = [p for p in common_platforms if any(kw.lower() in str(p).lower() for kw in samsung_keywords)]
+                                other_platforms = [p for p in common_platforms if p not in samsung_platforms]
+                                
+                                # 삼성베네포유를 제외한 플랫폼들의 매출이익금 최대값 계산
+                                other_profit_values = [platform_profit.get(p, 0) for p in other_platforms]
+                                max_other_profit = max(other_profit_values) if len(other_profit_values) > 0 else 0
+                                
+                                # 매출이익금 바 차트 (왼쪽 Y축)
+                                # 삼성베네포유와 다른 플랫폼을 구분하여 색상 지정
+                                profit_colors = []
+                                for p in common_platforms:
+                                    if any(kw.lower() in str(p).lower() for kw in samsung_keywords):
+                                        profit_colors.append('#FF6B6B')  # 빨간색 (삼성베네포유)
+                                    else:
+                                        profit_colors.append('#32CD32')  # 초록색 (기타)
+                                
                                 fig_combined.add_trace(
                                     go.Bar(
                                         x=common_platforms,
-                                        y=[platform_qty.get(p, 0) for p in common_platforms],
-                                        name='판매수량',
-                                        marker_color='#87CEEB',
-                                        hovertemplate='<b>%{x}</b><br>판매수량: %{y}건<extra></extra>'
+                                        y=[platform_profit.get(p, 0) for p in common_platforms],
+                                        name='매출이익금',
+                                        marker_color=profit_colors,
+                                        hovertemplate='<b>%{x}</b><br>매출이익금: %{y:,.0f}원<extra></extra>'
                                     ),
                                     secondary_y=False
                                 )
                                 
-                                # 매출이익금 라인 차트 (오른쪽 Y축)
+                                # 판매수량 라인 차트 (오른쪽 Y축)
                                 fig_combined.add_trace(
                                     go.Scatter(
                                         x=common_platforms,
-                                        y=[platform_profit.get(p, 0) for p in common_platforms],
-                                        name='매출이익금',
+                                        y=[platform_qty.get(p, 0) for p in common_platforms],
+                                        name='판매수량',
                                         mode='lines+markers',
-                                        marker=dict(size=10, color='#32CD32'),
-                                        line=dict(width=3, color='#32CD32'),
-                                        hovertemplate='<b>%{x}</b><br>매출이익금: %{y:,.0f}원<extra></extra>'
+                                        marker=dict(size=10, color='#87CEEB'),
+                                        line=dict(width=3, color='#87CEEB'),
+                                        hovertemplate='<b>%{x}</b><br>판매수량: %{y}건<extra></extra>'
                                     ),
                                     secondary_y=True
                                 )
@@ -1960,20 +1979,30 @@ if uploaded_file is not None:
                                     yaxis2=dict(showgrid=False)  # 오른쪽 Y축은 그리드 라인 제거
                                 )
                                 
-                                # Y축 설정
+                                # Y축 설정 - 삼성베네포유를 제외한 플랫폼들의 차이를 잘 보이도록 범위 조정
+                                if len(samsung_platforms) > 0 and max_other_profit > 0:
+                                    # 삼성베네포유가 있고 다른 플랫폼들도 있는 경우
+                                    # Y축 범위를 다른 플랫폼들의 최대값 기준으로 설정 (약간의 여유 공간 추가)
+                                    yaxis_range = [0, max_other_profit * 1.2]  # 20% 여유 공간
+                                else:
+                                    # 삼성베네포유가 없거나 다른 플랫폼이 없는 경우 전체 범위 사용
+                                    yaxis_range = None
+                                
                                 fig_combined.update_yaxes(
-                                    title_text="판매수량 (건)",
+                                    title_text="매출이익금 (원)",
+                                    tickformat=',',
                                     secondary_y=False,
                                     showgrid=True,
                                     gridwidth=1,
                                     gridcolor='rgba(128,128,128,0.2)',
-                                    nticks=6  # 눈금 개수 제한
+                                    nticks=6,  # 눈금 개수 제한
+                                    range=yaxis_range  # Y축 범위 설정
                                 )
                                 fig_combined.update_yaxes(
-                                    title_text="매출이익금 (원)",
-                                    tickformat=',',
+                                    title_text="판매수량 (건)",
                                     secondary_y=True,
                                     showgrid=False,  # 오른쪽 Y축은 그리드 라인 제거
+                                    showticklabels=False,  # 보조 Y축 눈금선 제거
                                     nticks=6  # 눈금 개수 제한
                                 )
                                 
@@ -2162,7 +2191,7 @@ if uploaded_file is not None:
         
         # 핵심 매출 기여 상품 분석 (삼성베네포유 플랫폼 기준)
         st.markdown("---")
-        st.markdown("#### 💎 핵심 매출 기여 상품 분석 (누적)")
+        st.markdown("#### 💎 핵심 매출 기여 상품 분석")
         
         # 2025년 판매분석 시트 찾기 (우선순위)
         sales_analysis_sheet = None
@@ -2172,25 +2201,26 @@ if uploaded_file is not None:
                 break
         
         # 2025년 판매분석 시트가 있으면 우선 사용
-        df_analysis = None
+        df_analysis_base = None
         if sales_analysis_sheet:
             try:
                 df_sales_analysis = pd.read_excel(xls, sheet_name=sales_analysis_sheet)
                 if len(df_sales_analysis) > 0:
-                    df_analysis = df_sales_analysis.copy()
+                    df_analysis_base = df_sales_analysis.copy()
             except Exception as e:
                 st.warning(f"⚠️ 2025년 판매분석 시트({sales_analysis_sheet})를 로드하는 중 오류 발생: {str(e)}")
-                df_analysis = None
+                df_analysis_base = None
         
         # 2025년 판매분석 시트가 없거나 로드 실패한 경우 기존 방식 사용
-        if df_analysis is None or len(df_analysis) == 0:
+        if df_analysis_base is None or len(df_analysis_base) == 0:
             # 11월, 12월, 1월 시트 찾기 및 합산
             november_sheet = None
             december_sheet = None
             january_sheet = None
             for sheet in sheet_names:
                 sheet_lower = sheet.lower()
-                if '11월' in sheet or ('11' in sheet and '월' in sheet) or 'november' in sheet_lower or 'nov' in sheet_lower:
+                # 11월 시트 찾기 (2025년 11월 raw 시트는 제외)
+                if ('11월' in sheet or ('11' in sheet and '월' in sheet) or 'november' in sheet_lower or 'nov' in sheet_lower) and 'raw' not in sheet_lower:
                     november_sheet = sheet
                 if '12월' in sheet or ('12' in sheet and '월' in sheet) or 'december' in sheet_lower or 'dec' in sheet_lower:
                     december_sheet = sheet
@@ -2213,9 +2243,9 @@ if uploaded_file is not None:
             
             # 합산된 데이터가 있으면 사용, 없으면 기존 df 사용
             if len(df_combined) > 0:
-                df_analysis = df_combined.copy()
+                df_analysis_base = df_combined.copy()
             else:
-                df_analysis = df.copy()
+                df_analysis_base = df.copy()
         
         # 2025년 판매분석 시트인지 확인
         is_sales_analysis_sheet = sales_analysis_sheet is not None
@@ -2223,36 +2253,98 @@ if uploaded_file is not None:
         # 상품코드 컬럼 찾기 (일반적으로 C열 또는 D열 근처)
         product_code_col = None
         product_code_keywords = ['상품코드', 'product', 'code', '코드', '상품', '제품코드', '상품 코드', '제품 코드']
-        for idx, col in enumerate(df_analysis.columns):
-            col_str = str(col).lower()
-            if any(keyword in col_str for keyword in product_code_keywords) and '상품명' not in col_str and '상품이름' not in col_str:
-                product_code_col = col
-                break
+        if df_analysis_base is not None and len(df_analysis_base) > 0:
+            for idx, col in enumerate(df_analysis_base.columns):
+                col_str = str(col).lower()
+                if any(keyword in col_str for keyword in product_code_keywords) and '상품명' not in col_str and '상품이름' not in col_str:
+                    product_code_col = col
+                    break
+            
+            # 상품코드 컬럼을 찾지 못한 경우 C열(인덱스 2) 또는 D열(인덱스 3) 시도
+            if product_code_col is None:
+                if len(df_analysis_base.columns) > 2:
+                    product_code_col = df_analysis_base.columns[2]  # C열
+                elif len(df_analysis_base.columns) > 3:
+                    product_code_col = df_analysis_base.columns[3]  # D열
+            
+            # 판매 수량 컬럼 찾기
+            sales_qty_col = None
+            sales_qty_keywords = ['판매수량', '판매 수량', '수량', 'quantity', 'qty', '판매량', 'sales', 'quantity']
+            for idx, col in enumerate(df_analysis_base.columns):
+                col_str = str(col).lower()
+                if any(keyword in col_str for keyword in sales_qty_keywords):
+                    sales_qty_col = col
+                    break
+            
+            # 판매 수량 컬럼을 찾지 못한 경우 I열(인덱스 8) 시도
+            if sales_qty_col is None:
+                i_column_index = 8  # I열은 9번째 (0-based index: 8)
+                if len(df_analysis_base.columns) > i_column_index:
+                    sales_qty_col = df_analysis_base.columns[i_column_index]
         
-        # 상품코드 컬럼을 찾지 못한 경우 C열(인덱스 2) 또는 D열(인덱스 3) 시도
-        if product_code_col is None:
-            if len(df_analysis.columns) > 2:
-                product_code_col = df_analysis.columns[2]  # C열
-            elif len(df_analysis.columns) > 3:
-                product_code_col = df_analysis.columns[3]  # D열
+        # 날짜 컬럼 찾기 (분기별 필터링용)
+        date_col = None
+        if df_analysis_base is not None and len(df_analysis_base) > 0 and is_sales_analysis_sheet:
+            date_keywords = ['날짜', 'date', 'Date', 'DATE', '일자', '거래일', '판매일', '주문일']
+            for col in df_analysis_base.columns:
+                col_str = str(col).lower()
+                if any(keyword in col_str for keyword in date_keywords):
+                    date_col = col
+                    break
+            
+            # 날짜 컬럼을 찾지 못한 경우 datetime 타입 컬럼 찾기
+            if date_col is None:
+                date_columns = df_analysis_base.select_dtypes(include=['datetime64']).columns.tolist()
+                if len(date_columns) > 0:
+                    date_col = date_columns[0]
+                else:
+                    # 문자열 형식의 날짜 컬럼 찾기
+                    for col in df_analysis_base.columns:
+                        if df_analysis_base[col].dtype == 'object':
+                            try:
+                                test_date = pd.to_datetime(df_analysis_base[col].dropna().iloc[0] if len(df_analysis_base[col].dropna()) > 0 else None, errors='coerce')
+                                if pd.notna(test_date):
+                                    date_col = col
+                                    break
+                            except:
+                                pass
         
-        # 판매 수량 컬럼 찾기
-        sales_qty_col = None
-        sales_qty_keywords = ['판매수량', '판매 수량', '수량', 'quantity', 'qty', '판매량', 'sales', 'quantity']
-        for idx, col in enumerate(df_analysis.columns):
-            col_str = str(col).lower()
-            if any(keyword in col_str for keyword in sales_qty_keywords):
-                sales_qty_col = col
-                break
+        # 기간 선택 옵션
+        period_options = ["전체"]
+        if date_col and df_analysis_base is not None and len(df_analysis_base) > 0:
+            # 날짜 컬럼을 datetime으로 변환
+            df_analysis_base[date_col] = pd.to_datetime(df_analysis_base[date_col], errors='coerce')
+            df_analysis_base = df_analysis_base[df_analysis_base[date_col].notna()].copy()
+            
+            # 년, 월, 분기 컬럼 추가
+            df_analysis_base['년'] = df_analysis_base[date_col].dt.year
+            df_analysis_base['월'] = df_analysis_base[date_col].dt.month
+            df_analysis_base['분기'] = df_analysis_base['월'].apply(lambda x: (x - 1) // 3 + 1)
+            
+            # 2025년 데이터만 필터링
+            df_2025 = df_analysis_base[df_analysis_base['년'] == 2025].copy()
+            if len(df_2025) > 0:
+                available_quarters = sorted(df_2025['분기'].unique())
+                for q in available_quarters:
+                    period_options.append(f"2025년 {q}분기")
         
-        # 판매 수량 컬럼을 찾지 못한 경우 I열(인덱스 8) 시도
-        if sales_qty_col is None:
-            i_column_index = 8  # I열은 9번째 (0-based index: 8)
-            if len(df_analysis.columns) > i_column_index:
-                sales_qty_col = df_analysis.columns[i_column_index]
+        # 기간 선택
+        selected_period = st.selectbox("기간 선택", period_options, key='period_select')
+        
+        # 선택된 기간에 따라 데이터 필터링
+        df_analysis = None
+        if df_analysis_base is not None and len(df_analysis_base) > 0:
+            if selected_period == "전체":
+                df_analysis = df_analysis_base.copy()
+            elif "분기" in selected_period:
+                # 분기 추출 (예: "2025년 1분기" -> 1)
+                quarter_num = int(selected_period.split("분기")[0].split()[-1])
+                df_analysis = df_analysis_base[(df_analysis_base['년'] == 2025) & (df_analysis_base['분기'] == quarter_num)].copy()
+            else:
+                df_analysis = df_analysis_base.copy()
         
         # 2025년 판매분석 시트인 경우: 상품 코드 기준으로 직접 집계 (플랫폼 필터링 없음)
-        if is_sales_analysis_sheet and product_code_col and sales_qty_col:
+        if is_sales_analysis_sheet and product_code_col and sales_qty_col and df_analysis is not None and len(df_analysis) > 0:
             # 판매수량이 숫자형이 아니면 변환
             if df_analysis[sales_qty_col].dtype == 'object':
                 df_analysis[sales_qty_col] = pd.to_numeric(df_analysis[sales_qty_col], errors='coerce')
@@ -2307,11 +2399,12 @@ if uploaded_file is not None:
             product_sales_display = product_sales.copy()
             product_sales_display['판매수량'] = product_sales_display['판매수량'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
             
-            st.info(f"📊 2025년 판매분석 시트 기준 상품코드별 판매수량 분석 (총 {len(product_sales)}개 상품)")
+            period_label = selected_period if selected_period != "전체" else "2025.01 ~ 현재 누적"
+            st.info(f"📊 {period_label} 상품코드별 판매수량 분석 (총 {len(product_sales)}개 상품)")
             st.dataframe(product_sales_display[display_cols], use_container_width=True, height=400, hide_index=True)
         
         # 기존 방식: 플랫폼 필터링 후 집계
-        elif not is_sales_analysis_sheet:
+        elif not is_sales_analysis_sheet and df_analysis is not None and len(df_analysis) > 0:
             # A열 찾기 (플랫폼, 1번째 컬럼, 인덱스 0)
             platform_col = None
             if len(df_analysis.columns) > 0:
@@ -2377,7 +2470,8 @@ if uploaded_file is not None:
                     product_sales_display = product_sales.copy()
                     product_sales_display['판매수량'] = product_sales_display['판매수량'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
                     
-                    st.info(f"📊 삼성베네포유 플랫폼 기준 상품코드별 판매수량 분석 (총 {len(product_sales)}개 상품)")
+                    period_label = selected_period if selected_period != "전체" else "2025.01 ~ 현재 누적"
+                    st.info(f"📊 {period_label} 삼성베네포유 플랫폼 기준 상품코드별 판매수량 분석 (총 {len(product_sales)}개 상품)")
                     st.dataframe(product_sales_display[display_cols], use_container_width=True, height=400, hide_index=True)
                 else:
                     st.warning("⚠️ 삼성베네포유 플랫폼 데이터를 찾을 수 없습니다.")
