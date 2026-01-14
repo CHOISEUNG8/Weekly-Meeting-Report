@@ -2164,59 +2164,68 @@ if uploaded_file is not None:
         st.markdown("---")
         st.markdown("#### 💎 핵심 매출 기여 상품 분석 (누적)")
         
-        # 11월, 12월, 1월 시트 찾기 및 합산
-        november_sheet = None
-        december_sheet = None
-        january_sheet = None
+        # 2025년 판매분석 시트 찾기 (우선순위)
+        sales_analysis_sheet = None
         for sheet in sheet_names:
-            sheet_lower = sheet.lower()
-            if '11월' in sheet or ('11' in sheet and '월' in sheet) or 'november' in sheet_lower or 'nov' in sheet_lower:
-                november_sheet = sheet
-            if '12월' in sheet or ('12' in sheet and '월' in sheet) or 'december' in sheet_lower or 'dec' in sheet_lower:
-                december_sheet = sheet
-            if '1월' in sheet or ('1' in sheet and '월' in sheet and '11' not in sheet and '12' not in sheet) or 'january' in sheet_lower or 'jan' in sheet_lower:
-                january_sheet = sheet
+            if '2025' in sheet and ('판매분석' in sheet or '판매' in sheet and '분석' in sheet):
+                sales_analysis_sheet = sheet
+                break
         
-        # 11월, 12월, 1월 시트를 모두 로드하여 합산
-        df_combined = pd.DataFrame()
-        loaded_sheets = []
+        # 2025년 판매분석 시트가 있으면 우선 사용
+        df_analysis = None
+        if sales_analysis_sheet:
+            try:
+                df_sales_analysis = pd.read_excel(xls, sheet_name=sales_analysis_sheet)
+                if len(df_sales_analysis) > 0:
+                    df_analysis = df_sales_analysis.copy()
+            except Exception as e:
+                st.warning(f"⚠️ 2025년 판매분석 시트({sales_analysis_sheet})를 로드하는 중 오류 발생: {str(e)}")
+                df_analysis = None
         
-        for month_name, sheet_name in [("11월", november_sheet), ("12월", december_sheet), ("1월", january_sheet)]:
-            if sheet_name:
-                try:
-                    df_month = pd.read_excel(xls, sheet_name=sheet_name)
-                    if len(df_month) > 0:
-                        df_combined = pd.concat([df_combined, df_month], ignore_index=True)
-                        loaded_sheets.append(month_name)
-                except Exception as e:
-                    st.warning(f"⚠️ {month_name} 시트({sheet_name})를 로드하는 중 오류 발생: {str(e)}")
+        # 2025년 판매분석 시트가 없거나 로드 실패한 경우 기존 방식 사용
+        if df_analysis is None or len(df_analysis) == 0:
+            # 11월, 12월, 1월 시트 찾기 및 합산
+            november_sheet = None
+            december_sheet = None
+            january_sheet = None
+            for sheet in sheet_names:
+                sheet_lower = sheet.lower()
+                if '11월' in sheet or ('11' in sheet and '월' in sheet) or 'november' in sheet_lower or 'nov' in sheet_lower:
+                    november_sheet = sheet
+                if '12월' in sheet or ('12' in sheet and '월' in sheet) or 'december' in sheet_lower or 'dec' in sheet_lower:
+                    december_sheet = sheet
+                if '1월' in sheet or ('1' in sheet and '월' in sheet and '11' not in sheet and '12' not in sheet) or 'january' in sheet_lower or 'jan' in sheet_lower:
+                    january_sheet = sheet
+            
+            # 11월, 12월, 1월 시트를 모두 로드하여 합산
+            df_combined = pd.DataFrame()
+            loaded_sheets = []
+            
+            for month_name, sheet_name in [("11월", november_sheet), ("12월", december_sheet), ("1월", january_sheet)]:
+                if sheet_name:
+                    try:
+                        df_month = pd.read_excel(xls, sheet_name=sheet_name)
+                        if len(df_month) > 0:
+                            df_combined = pd.concat([df_combined, df_month], ignore_index=True)
+                            loaded_sheets.append(month_name)
+                    except Exception as e:
+                        st.warning(f"⚠️ {month_name} 시트({sheet_name})를 로드하는 중 오류 발생: {str(e)}")
+            
+            # 합산된 데이터가 있으면 사용, 없으면 기존 df 사용
+            if len(df_combined) > 0:
+                df_analysis = df_combined.copy()
+            else:
+                df_analysis = df.copy()
         
-        # 합산된 데이터가 있으면 사용, 없으면 기존 df 사용
-        if len(df_combined) > 0:
-            df_analysis = df_combined.copy()
-            # if len(loaded_sheets) > 0:
-            #     st.info(f"📊 {', '.join(loaded_sheets)} 시트 데이터를 합산하여 분석합니다. (총 {len(df_analysis):,}건)")  # 숨김 처리
-        else:
-            df_analysis = df.copy()
-            # st.info("📊 단일 시트 데이터를 분석합니다.")  # 숨김 처리
-        
-        # A열 찾기 (플랫폼, 1번째 컬럼, 인덱스 0)
-        platform_col = None
-        if len(df_analysis.columns) > 0:
-            platform_col = df_analysis.columns[0]  # A열 (1번째 컬럼)
-        
-        # I열 찾기 (판매 수량, 9번째 컬럼, 인덱스 8)
-        i_column_index = 8  # I열은 9번째 (0-based index: 8)
-        sales_qty_col = None
-        if len(df_analysis.columns) > i_column_index:
-            sales_qty_col = df_analysis.columns[i_column_index]
+        # 2025년 판매분석 시트인지 확인
+        is_sales_analysis_sheet = sales_analysis_sheet is not None
         
         # 상품코드 컬럼 찾기 (일반적으로 C열 또는 D열 근처)
         product_code_col = None
-        product_code_keywords = ['상품코드', 'product', 'code', '코드', '상품', '제품코드']
+        product_code_keywords = ['상품코드', 'product', 'code', '코드', '상품', '제품코드', '상품 코드', '제품 코드']
         for idx, col in enumerate(df_analysis.columns):
             col_str = str(col).lower()
-            if any(keyword in col_str for keyword in product_code_keywords) and '상품명' not in col_str:
+            if any(keyword in col_str for keyword in product_code_keywords) and '상품명' not in col_str and '상품이름' not in col_str:
                 product_code_col = col
                 break
         
@@ -2227,76 +2236,164 @@ if uploaded_file is not None:
             elif len(df_analysis.columns) > 3:
                 product_code_col = df_analysis.columns[3]  # D열
         
-        if platform_col and sales_qty_col and product_code_col:
-            # 삼성베네포유 플랫폼 필터링
-            samsung_beneforyou_keywords = ['삼성베네포유', '베네포유', 'beneforyou', 'samsung']
-            df_samsung = df_analysis[df_analysis[platform_col].astype(str).str.contains('|'.join(samsung_beneforyou_keywords), case=False, na=False, regex=True)]
+        # 판매 수량 컬럼 찾기
+        sales_qty_col = None
+        sales_qty_keywords = ['판매수량', '판매 수량', '수량', 'quantity', 'qty', '판매량', 'sales', 'quantity']
+        for idx, col in enumerate(df_analysis.columns):
+            col_str = str(col).lower()
+            if any(keyword in col_str for keyword in sales_qty_keywords):
+                sales_qty_col = col
+                break
+        
+        # 판매 수량 컬럼을 찾지 못한 경우 I열(인덱스 8) 시도
+        if sales_qty_col is None:
+            i_column_index = 8  # I열은 9번째 (0-based index: 8)
+            if len(df_analysis.columns) > i_column_index:
+                sales_qty_col = df_analysis.columns[i_column_index]
+        
+        # 2025년 판매분석 시트인 경우: 상품 코드 기준으로 직접 집계 (플랫폼 필터링 없음)
+        if is_sales_analysis_sheet and product_code_col and sales_qty_col:
+            # 판매수량이 숫자형이 아니면 변환
+            if df_analysis[sales_qty_col].dtype == 'object':
+                df_analysis[sales_qty_col] = pd.to_numeric(df_analysis[sales_qty_col], errors='coerce')
             
-            if len(df_samsung) > 0:
-                # 판매수량이 숫자형이 아니면 변환
-                if df_samsung[sales_qty_col].dtype == 'object':
-                    df_samsung[sales_qty_col] = pd.to_numeric(df_samsung[sales_qty_col], errors='coerce')
-                
-                # 상품코드별 판매수량 집계 (판매가 많이 된 순서)
-                product_sales = df_samsung.groupby(product_code_col)[sales_qty_col].sum().reset_index()
-                product_sales.columns = ['상품코드', '판매수량']
-                product_sales = product_sales.sort_values('판매수량', ascending=False)  # 판매가 많이 된 순서
-                
-                # 업체명 컬럼 찾기
-                company_col = None
-                company_keywords = ['업체', '제조사', 'company', 'manufacturer', 'maker', '회사', '고객', 'customer', '제조업체']
-                for col in df_analysis.columns:
-                    col_str = str(col).lower()
-                    if any(keyword in col_str for keyword in company_keywords):
-                        company_col = col
-                        break
-                
-                # 업체명 컬럼을 찾지 못한 경우 B열(인덱스 1) 시도
-                if company_col is None and len(df_analysis.columns) > 1:
-                    company_col = df_analysis.columns[1]  # B열
-                
-                # 업체명 추가 (있는 경우)
-                if company_col:
-                    # 상품코드별 가장 많이 나타나는 업체명 사용
-                    company_mapping = df_samsung.groupby(product_code_col)[company_col].apply(lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.iloc[0]).to_dict()
-                    product_sales['업체명'] = product_sales['상품코드'].map(company_mapping)
-                    product_sales['업체명'] = product_sales['업체명'].fillna('미확인')
-                else:
-                    product_sales['업체명'] = '미확인'
-                
-                # 상품명 컬럼 찾기 (있는 경우)
-                product_name_col = None
-                product_name_keywords = ['상품명', 'product name', '품명', 'name', '제품명', '상품이름']
-                for col in df_analysis.columns:
-                    col_str = str(col).lower()
-                    if any(keyword in col_str for keyword in product_name_keywords):
-                        product_name_col = col
-                        break
-                
-                # 상품명 추가 (있는 경우)
-                if product_name_col:
-                    # 상품코드별 첫 번째 상품명 사용
-                    product_name_mapping = df_samsung.groupby(product_code_col)[product_name_col].first().to_dict()
-                    product_sales['상품명'] = product_sales['상품코드'].map(product_name_mapping)
-                    product_sales['상품명'] = product_sales['상품명'].fillna(product_sales['상품코드'])
-                    display_cols = ['업체명', '상품코드', '상품명', '판매수량']
-                else:
-                    display_cols = ['업체명', '상품코드', '판매수량']
-                
-                # 표시용 데이터 준비
-                product_sales_display = product_sales.copy()
-                product_sales_display['판매수량'] = product_sales_display['판매수량'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
-                
-                st.info(f"📊 삼성베네포유 플랫폼 기준 상품코드별 판매수량 분석 (총 {len(product_sales)}개 상품)")
-                st.dataframe(product_sales_display[display_cols], use_container_width=True, height=400, hide_index=True)
+            # 상품코드별 판매수량 집계 (판매가 많이 된 순서)
+            product_sales = df_analysis.groupby(product_code_col)[sales_qty_col].sum().reset_index()
+            product_sales.columns = ['상품코드', '판매수량']
+            product_sales = product_sales.sort_values('판매수량', ascending=False)  # 판매가 많이 된 순서
+            
+            # 업체명 컬럼 찾기
+            company_col = None
+            company_keywords = ['업체', '제조사', 'company', 'manufacturer', 'maker', '회사', '고객', 'customer', '제조업체']
+            for col in df_analysis.columns:
+                col_str = str(col).lower()
+                if any(keyword in col_str for keyword in company_keywords):
+                    company_col = col
+                    break
+            
+            # 업체명 컬럼을 찾지 못한 경우 B열(인덱스 1) 시도
+            if company_col is None and len(df_analysis.columns) > 1:
+                company_col = df_analysis.columns[1]  # B열
+            
+            # 업체명 추가 (있는 경우)
+            if company_col:
+                # 상품코드별 가장 많이 나타나는 업체명 사용
+                company_mapping = df_analysis.groupby(product_code_col)[company_col].apply(lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.iloc[0]).to_dict()
+                product_sales['업체명'] = product_sales['상품코드'].map(company_mapping)
+                product_sales['업체명'] = product_sales['업체명'].fillna('미확인')
             else:
-                st.warning("⚠️ 삼성베네포유 플랫폼 데이터를 찾을 수 없습니다.")
+                product_sales['업체명'] = '미확인'
+            
+            # 상품명 컬럼 찾기 (있는 경우)
+            product_name_col = None
+            product_name_keywords = ['상품명', 'product name', '품명', 'name', '제품명', '상품이름']
+            for col in df_analysis.columns:
+                col_str = str(col).lower()
+                if any(keyword in col_str for keyword in product_name_keywords):
+                    product_name_col = col
+                    break
+            
+            # 상품명 추가 (있는 경우)
+            if product_name_col:
+                # 상품코드별 첫 번째 상품명 사용
+                product_name_mapping = df_analysis.groupby(product_code_col)[product_name_col].first().to_dict()
+                product_sales['상품명'] = product_sales['상품코드'].map(product_name_mapping)
+                product_sales['상품명'] = product_sales['상품명'].fillna(product_sales['상품코드'])
+                display_cols = ['업체명', '상품코드', '상품명', '판매수량']
+            else:
+                display_cols = ['업체명', '상품코드', '판매수량']
+            
+            # 표시용 데이터 준비
+            product_sales_display = product_sales.copy()
+            product_sales_display['판매수량'] = product_sales_display['판매수량'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
+            
+            st.info(f"📊 2025년 판매분석 시트 기준 상품코드별 판매수량 분석 (총 {len(product_sales)}개 상품)")
+            st.dataframe(product_sales_display[display_cols], use_container_width=True, height=400, hide_index=True)
+        
+        # 기존 방식: 플랫폼 필터링 후 집계
+        elif not is_sales_analysis_sheet:
+            # A열 찾기 (플랫폼, 1번째 컬럼, 인덱스 0)
+            platform_col = None
+            if len(df_analysis.columns) > 0:
+                platform_col = df_analysis.columns[0]  # A열 (1번째 컬럼)
+            
+            if platform_col and sales_qty_col and product_code_col:
+                # 삼성베네포유 플랫폼 필터링
+                samsung_beneforyou_keywords = ['삼성베네포유', '베네포유', 'beneforyou', 'samsung']
+                df_samsung = df_analysis[df_analysis[platform_col].astype(str).str.contains('|'.join(samsung_beneforyou_keywords), case=False, na=False, regex=True)]
+                
+                if len(df_samsung) > 0:
+                    # 판매수량이 숫자형이 아니면 변환
+                    if df_samsung[sales_qty_col].dtype == 'object':
+                        df_samsung[sales_qty_col] = pd.to_numeric(df_samsung[sales_qty_col], errors='coerce')
+                    
+                    # 상품코드별 판매수량 집계 (판매가 많이 된 순서)
+                    product_sales = df_samsung.groupby(product_code_col)[sales_qty_col].sum().reset_index()
+                    product_sales.columns = ['상품코드', '판매수량']
+                    product_sales = product_sales.sort_values('판매수량', ascending=False)  # 판매가 많이 된 순서
+                    
+                    # 업체명 컬럼 찾기
+                    company_col = None
+                    company_keywords = ['업체', '제조사', 'company', 'manufacturer', 'maker', '회사', '고객', 'customer', '제조업체']
+                    for col in df_analysis.columns:
+                        col_str = str(col).lower()
+                        if any(keyword in col_str for keyword in company_keywords):
+                            company_col = col
+                            break
+                    
+                    # 업체명 컬럼을 찾지 못한 경우 B열(인덱스 1) 시도
+                    if company_col is None and len(df_analysis.columns) > 1:
+                        company_col = df_analysis.columns[1]  # B열
+                    
+                    # 업체명 추가 (있는 경우)
+                    if company_col:
+                        # 상품코드별 가장 많이 나타나는 업체명 사용
+                        company_mapping = df_samsung.groupby(product_code_col)[company_col].apply(lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.iloc[0]).to_dict()
+                        product_sales['업체명'] = product_sales['상품코드'].map(company_mapping)
+                        product_sales['업체명'] = product_sales['업체명'].fillna('미확인')
+                    else:
+                        product_sales['업체명'] = '미확인'
+                    
+                    # 상품명 컬럼 찾기 (있는 경우)
+                    product_name_col = None
+                    product_name_keywords = ['상품명', 'product name', '품명', 'name', '제품명', '상품이름']
+                    for col in df_analysis.columns:
+                        col_str = str(col).lower()
+                        if any(keyword in col_str for keyword in product_name_keywords):
+                            product_name_col = col
+                            break
+                    
+                    # 상품명 추가 (있는 경우)
+                    if product_name_col:
+                        # 상품코드별 첫 번째 상품명 사용
+                        product_name_mapping = df_samsung.groupby(product_code_col)[product_name_col].first().to_dict()
+                        product_sales['상품명'] = product_sales['상품코드'].map(product_name_mapping)
+                        product_sales['상품명'] = product_sales['상품명'].fillna(product_sales['상품코드'])
+                        display_cols = ['업체명', '상품코드', '상품명', '판매수량']
+                    else:
+                        display_cols = ['업체명', '상품코드', '판매수량']
+                    
+                    # 표시용 데이터 준비
+                    product_sales_display = product_sales.copy()
+                    product_sales_display['판매수량'] = product_sales_display['판매수량'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
+                    
+                    st.info(f"📊 삼성베네포유 플랫폼 기준 상품코드별 판매수량 분석 (총 {len(product_sales)}개 상품)")
+                    st.dataframe(product_sales_display[display_cols], use_container_width=True, height=400, hide_index=True)
+                else:
+                    st.warning("⚠️ 삼성베네포유 플랫폼 데이터를 찾을 수 없습니다.")
+            else:
+                missing_cols = []
+                if not platform_col:
+                    missing_cols.append("플랫폼 컬럼(A열)")
+                if not sales_qty_col:
+                    missing_cols.append("판매수량 컬럼")
+                if not product_code_col:
+                    missing_cols.append("상품코드 컬럼")
+                st.warning(f"⚠️ {', '.join(missing_cols)}을(를) 찾을 수 없습니다.")
         else:
             missing_cols = []
-            if not platform_col:
-                missing_cols.append("플랫폼 컬럼(A열)")
             if not sales_qty_col:
-                missing_cols.append("판매수량 컬럼(I열)")
+                missing_cols.append("판매수량 컬럼")
             if not product_code_col:
                 missing_cols.append("상품코드 컬럼")
             st.warning(f"⚠️ {', '.join(missing_cols)}을(를) 찾을 수 없습니다.")
