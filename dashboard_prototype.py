@@ -123,7 +123,21 @@ def get_week_date_range(week_num, month, min_week, year=None):
 def save_memo_to_file(key, value):
     """메모를 JSON 파일로 저장 (원본 포맷 보존, 원자적 쓰기로 안전하게 저장)"""
     try:
+        # 빈 값으로 저장하려 할 때 기존 파일이 있으면 경고하고 저장하지 않음 (데이터 손실 방지)
         file_path = os.path.join(MEMO_DATA_DIR, f"{key}.json")
+        if not value or not value.strip():
+            # 빈 값인데 기존 파일이 있고 내용이 있다면 저장하지 않음
+            if os.path.exists(file_path):
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        existing_data = json.load(f)
+                        existing_content = existing_data.get("content", "")
+                        if existing_content and existing_content.strip():
+                            # 기존 내용이 있는데 빈 값으로 덮어쓰려 하면 저장하지 않음
+                            return
+                except:
+                    pass  # 파일 읽기 실패 시 계속 진행
+        
         # 임시 파일 경로 생성
         temp_file_path = file_path + ".tmp"
         
@@ -690,6 +704,26 @@ if uploaded_file is not None:
             current_week_state_key_executive = f"current_week_sidebar_executive_{executive_meeting_key_sidebar}"
             last_selected_week_key = f"last_selected_week_sidebar_executive_{month_label_for_meeting}"
             
+            # 주차 변경 감지 및 이전 주차 데이터 저장
+            if last_selected_week_key in st.session_state and st.session_state[last_selected_week_key] != selected_week_sidebar:
+                # 주차가 변경되었으므로 이전 주차의 데이터를 파일에 저장
+                previous_week_sidebar = st.session_state[last_selected_week_key]
+                previous_executive_meeting_key = f"executive_meeting_{month_label_for_meeting}_{previous_week_sidebar}"
+                previous_executive_input_key = f"executive_meeting_input_sidebar_{month_label_for_meeting}_{previous_week_sidebar}"
+                
+                # 이전 주차의 경영진 회의록 저장 (입력창 내용 우선 확인)
+                previous_executive_meeting = ""
+                if previous_executive_input_key in st.session_state:
+                    # 입력창의 내용이 있으면 우선 사용
+                    previous_executive_meeting = st.session_state[previous_executive_input_key]
+                elif previous_executive_meeting_key in st.session_state:
+                    # 입력창 내용이 없으면 session_state 확인
+                    previous_executive_meeting = st.session_state[previous_executive_meeting_key]
+                
+                # 빈 값이 아닐 때만 저장
+                if previous_executive_meeting and previous_executive_meeting.strip():
+                    save_memo_to_file(previous_executive_meeting_key, previous_executive_meeting)
+            
             # 주차가 변경되었는지 확인
             if current_week_state_key_executive not in st.session_state or st.session_state.get(last_selected_week_key) != selected_week_sidebar:
                 # 주차가 변경되었거나 처음 로드하는 경우 파일에서 불러오기
@@ -699,6 +733,8 @@ if uploaded_file is not None:
                     # 입력창의 session_state도 업데이트
                     st.session_state[executive_input_key] = loaded_executive_meeting
                 else:
+                    # 파일에서 불러온 값이 없으면 session_state에 빈 값으로 설정하지 않음
+                    # 대신 빈 문자열로 초기화하되, 나중에 저장할 때는 빈 값 저장 방지 로직이 작동함
                     if executive_meeting_key_sidebar not in st.session_state:
                         st.session_state[executive_meeting_key_sidebar] = ""
                     # 입력창의 session_state도 초기화
@@ -737,8 +773,24 @@ if uploaded_file is not None:
             if executive_meeting_text_sidebar != st.session_state.get(executive_meeting_key_sidebar, ""):
                 # 입력창 내용을 그대로 저장 (사용자가 기존 내용을 포함하여 편집한 것으로 간주)
                 st.session_state[executive_meeting_key_sidebar] = executive_meeting_text_sidebar
-                save_memo_to_file(executive_meeting_key_sidebar, executive_meeting_text_sidebar)
-                st.sidebar.success(f"✅ {selected_week_sidebar} 경영진 회의록이 저장되었습니다.", icon="💾")
+                # 빈 값이 아닐 때만 저장
+                if executive_meeting_text_sidebar and executive_meeting_text_sidebar.strip():
+                    save_memo_to_file(executive_meeting_key_sidebar, executive_meeting_text_sidebar)
+                    st.sidebar.success(f"✅ {selected_week_sidebar} 경영진 회의록이 저장되었습니다.", icon="💾")
+            
+            # 주기적인 자동 저장 (현재 주차 데이터 보존)
+            # 입력창 내용을 직접 확인하여 저장 (session_state와 동기화)
+            if executive_meeting_text_sidebar and executive_meeting_text_sidebar.strip():
+                # 입력창에 내용이 있으면 session_state에 반영
+                if executive_meeting_text_sidebar != st.session_state.get(executive_meeting_key_sidebar, ""):
+                    st.session_state[executive_meeting_key_sidebar] = executive_meeting_text_sidebar
+                
+                # 마지막 저장 시간 확인 (너무 자주 저장하지 않도록)
+                last_save_key_executive = f"last_auto_save_{executive_meeting_key_sidebar}"
+                current_time = time.time()
+                if last_save_key_executive not in st.session_state or current_time - st.session_state[last_save_key_executive] > 30:  # 30초마다 자동 저장
+                    save_memo_to_file(executive_meeting_key_sidebar, executive_meeting_text_sidebar)
+                    st.session_state[last_save_key_executive] = current_time
             
             # 저장된 경영진 회의록 표시
             if st.session_state.get(executive_meeting_key_sidebar, ""):
@@ -2565,14 +2617,34 @@ if uploaded_file is not None:
                     previous_week = st.session_state[last_week_key]
                     previous_memo_key_part1 = f"memo_{month_label}_{previous_week}_part1"
                     previous_memo_key_part2 = f"memo_{month_label}_{previous_week}_part2"
+                    previous_input_key_part1 = f"memo_input_{month_label}_{previous_week}_part1"
+                    previous_input_key_part2 = f"memo_input_{month_label}_{previous_week}_part2"
                     
-                    # 이전 주차의 1파트 메모가 session_state에 있으면 저장
-                    if previous_memo_key_part1 in st.session_state:
-                        save_memo_to_file(previous_memo_key_part1, st.session_state[previous_memo_key_part1])
+                    # 이전 주차의 1파트 메모 저장 (입력창 내용 우선 확인)
+                    previous_memo_part1 = ""
+                    if previous_input_key_part1 in st.session_state:
+                        # 입력창의 내용이 있으면 우선 사용
+                        previous_memo_part1 = st.session_state[previous_input_key_part1]
+                    elif previous_memo_key_part1 in st.session_state:
+                        # 입력창 내용이 없으면 session_state 확인
+                        previous_memo_part1 = st.session_state[previous_memo_key_part1]
                     
-                    # 이전 주차의 2파트 메모가 session_state에 있으면 저장
-                    if previous_memo_key_part2 in st.session_state:
-                        save_memo_to_file(previous_memo_key_part2, st.session_state[previous_memo_key_part2])
+                    # 빈 값이 아닐 때만 저장
+                    if previous_memo_part1 and previous_memo_part1.strip():
+                        save_memo_to_file(previous_memo_key_part1, previous_memo_part1)
+                    
+                    # 이전 주차의 2파트 메모 저장 (입력창 내용 우선 확인)
+                    previous_memo_part2 = ""
+                    if previous_input_key_part2 in st.session_state:
+                        # 입력창의 내용이 있으면 우선 사용
+                        previous_memo_part2 = st.session_state[previous_input_key_part2]
+                    elif previous_memo_key_part2 in st.session_state:
+                        # 입력창 내용이 없으면 session_state 확인
+                        previous_memo_part2 = st.session_state[previous_memo_key_part2]
+                    
+                    # 빈 값이 아닐 때만 저장
+                    if previous_memo_part2 and previous_memo_part2.strip():
+                        save_memo_to_file(previous_memo_key_part2, previous_memo_part2)
                 
                 # 파트별 메모 탭 생성
                 part_tabs = st.tabs(["1파트", "2파트"])
@@ -2659,7 +2731,10 @@ https://elsupervision.com/default/
                             st.session_state[memo_key_part1] = default_memo_part1
                             save_memo_to_file(memo_key_part1, default_memo_part1)
                         else:
-                            st.session_state[memo_key_part1] = ""
+                            # 파일에서 불러온 값이 없고 기본값도 없으면 session_state에 빈 값으로 설정하지 않음
+                            # 대신 빈 문자열로 초기화하되, 나중에 저장할 때는 빈 값 저장 방지 로직이 작동함
+                            if memo_key_part1 not in st.session_state:
+                                st.session_state[memo_key_part1] = ""
                         st.session_state[current_week_state_key_part1] = True
                         st.session_state[f"last_selected_week_part_{month_label}"] = selected_week_part
                     
@@ -2675,17 +2750,23 @@ https://elsupervision.com/default/
                     # 1파트 메모 저장 (입력 시마다 자동 저장)
                     if memo_text_part1 != st.session_state.get(memo_key_part1, ""):
                         st.session_state[memo_key_part1] = memo_text_part1
-                        save_memo_to_file(memo_key_part1, memo_text_part1)
-                        st.success(f"✅ {selected_week_part} 1파트 메모가 저장되었습니다.", icon="💾")
+                        # 빈 값이 아닐 때만 저장
+                        if memo_text_part1 and memo_text_part1.strip():
+                            save_memo_to_file(memo_key_part1, memo_text_part1)
+                            st.success(f"✅ {selected_week_part} 1파트 메모가 저장되었습니다.", icon="💾")
                     
                     # 주기적인 자동 저장 (현재 주차 데이터 보존)
-                    # 현재 주차의 데이터가 session_state에 있으면 파일에도 저장
-                    if memo_key_part1 in st.session_state and st.session_state[memo_key_part1]:
+                    # 입력창 내용을 직접 확인하여 저장 (session_state와 동기화)
+                    if memo_text_part1 and memo_text_part1.strip():
+                        # 입력창에 내용이 있으면 session_state에 반영
+                        if memo_text_part1 != st.session_state.get(memo_key_part1, ""):
+                            st.session_state[memo_key_part1] = memo_text_part1
+                        
                         # 마지막 저장 시간 확인 (너무 자주 저장하지 않도록)
                         last_save_key = f"last_auto_save_{memo_key_part1}"
                         current_time = time.time()
                         if last_save_key not in st.session_state or current_time - st.session_state[last_save_key] > 30:  # 30초마다 자동 저장
-                            save_memo_to_file(memo_key_part1, st.session_state[memo_key_part1])
+                            save_memo_to_file(memo_key_part1, memo_text_part1)
                             st.session_state[last_save_key] = current_time
                     
                     # 저장된 1파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
@@ -2711,7 +2792,10 @@ https://elsupervision.com/default/
                         if loaded_memo:
                             st.session_state[memo_key_part2] = loaded_memo
                         else:
-                            st.session_state[memo_key_part2] = ""
+                            # 파일에서 불러온 값이 없으면 session_state에 빈 값으로 설정하지 않음
+                            # 대신 빈 문자열로 초기화하되, 나중에 저장할 때는 빈 값 저장 방지 로직이 작동함
+                            if memo_key_part2 not in st.session_state:
+                                st.session_state[memo_key_part2] = ""
                         st.session_state[current_week_state_key_part2] = True
                         st.session_state[f"last_selected_week_part_{month_label}"] = selected_week_part
                     
@@ -2727,17 +2811,23 @@ https://elsupervision.com/default/
                     # 2파트 메모 저장 (입력 시마다 자동 저장)
                     if memo_text_part2 != st.session_state.get(memo_key_part2, ""):
                         st.session_state[memo_key_part2] = memo_text_part2
-                        save_memo_to_file(memo_key_part2, memo_text_part2)
-                        st.success(f"✅ {selected_week_part} 2파트 메모가 저장되었습니다.", icon="💾")
+                        # 빈 값이 아닐 때만 저장
+                        if memo_text_part2 and memo_text_part2.strip():
+                            save_memo_to_file(memo_key_part2, memo_text_part2)
+                            st.success(f"✅ {selected_week_part} 2파트 메모가 저장되었습니다.", icon="💾")
                     
                     # 주기적인 자동 저장 (현재 주차 데이터 보존)
-                    # 현재 주차의 데이터가 session_state에 있으면 파일에도 저장
-                    if memo_key_part2 in st.session_state and st.session_state[memo_key_part2]:
+                    # 입력창 내용을 직접 확인하여 저장 (session_state와 동기화)
+                    if memo_text_part2 and memo_text_part2.strip():
+                        # 입력창에 내용이 있으면 session_state에 반영
+                        if memo_text_part2 != st.session_state.get(memo_key_part2, ""):
+                            st.session_state[memo_key_part2] = memo_text_part2
+                        
                         # 마지막 저장 시간 확인 (너무 자주 저장하지 않도록)
                         last_save_key = f"last_auto_save_{memo_key_part2}"
                         current_time = time.time()
                         if last_save_key not in st.session_state or current_time - st.session_state[last_save_key] > 30:  # 30초마다 자동 저장
-                            save_memo_to_file(memo_key_part2, st.session_state[memo_key_part2])
+                            save_memo_to_file(memo_key_part2, memo_text_part2)
                             st.session_state[last_save_key] = current_time
                     
                     # 저장된 2파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
