@@ -798,7 +798,7 @@ if uploaded_file is not None:
                     executive_display = st.session_state[executive_meeting_key_sidebar].replace('\n', '<br>')
                     st.sidebar.markdown(executive_display, unsafe_allow_html=True)
             
-            # 모든 주차별 경영진 회의록 요약 보기
+            # 모든 주차별 경영진 회의록 요약 보기 (현재 선택된 주차 제외)
             st.sidebar.markdown("---")
             st.sidebar.markdown("#### 📋 주차별 경영진 회의록 요약")
             executive_meeting_summary = {}
@@ -806,6 +806,10 @@ if uploaded_file is not None:
             # 모든 주차의 회의록을 파일에서 불러와서 session_state에 저장 (요약 표시를 위해)
             # 매번 파일에서 확인하여 최신 데이터 보장
             for week in sidebar_weeks:
+                # 현재 선택된 주차는 제외 (위에서 이미 표시됨)
+                if week == selected_week_sidebar:
+                    continue
+                    
                 week_key = f"executive_meeting_{month_label_for_meeting}_{week}"
                 # 파일에서 불러오기 (항상 최신 데이터 확인)
                 loaded_executive_meeting = load_memo_from_file(week_key)
@@ -818,8 +822,10 @@ if uploaded_file is not None:
                     executive_meeting_summary[week] = st.session_state[week_key]
             
             if executive_meeting_summary:
-                # 정렬된 주차 순서로 표시
+                # 정렬된 주차 순서로 표시 (현재 선택된 주차 제외)
                 for week in sidebar_weeks:
+                    if week == selected_week_sidebar:
+                        continue  # 현재 선택된 주차는 제외
                     if week in executive_meeting_summary:
                         content = executive_meeting_summary[week]
                         # 내용 요약 (첫 100자만 표시)
@@ -827,15 +833,14 @@ if uploaded_file is not None:
                         with st.sidebar.expander(f"📋 {week} 경영진 회의록", expanded=False):
                             week_display = content.replace('\n', '<br>')
                             st.sidebar.markdown(week_display, unsafe_allow_html=True)
-            else:
-                st.sidebar.info("아직 작성된 주차별 경영진 회의록이 없습니다.")
         else:
             # 주차 정보가 없으면 경영진 회의록만 표시
             st.sidebar.info("주차 정보가 없어 주차별 경영진 회의록을 작성할 수 없습니다.")
         
         if '년' in df.columns:
             years = sorted(df['년'].dropna().unique())
-            selected_years = st.sidebar.multiselect("년도 선택", years, default=years)
+            # 년도 선택 필터 숨김 (기본값으로 모든 년도 선택)
+            selected_years = years
             df = df[df['년'].isin(selected_years)]
         
         # 선택된 월 데이터만 표시 중이면 월 필터는 숨김
@@ -2443,13 +2448,58 @@ if uploaded_file is not None:
                 product_name_mapping = df_analysis.groupby(product_code_col)[product_name_col].first().to_dict()
                 product_sales['상품명'] = product_sales['상품코드'].map(product_name_mapping)
                 product_sales['상품명'] = product_sales['상품명'].fillna(product_sales['상품코드'])
-                display_cols = ['업체명', '상품코드', '상품명', '판매수량']
+            
+            # 매출이익금 컬럼 찾기 및 추가
+            profit_col = None
+            profit_keywords = ['매출이익금', '이익금', 'profit', 'Profit', 'PROFIT', '매출이익', '이익', '수익', '수익금', 'GP', 'gp']
+            for col in df_analysis.columns:
+                col_str = str(col).lower()
+                if any(keyword in col_str for keyword in profit_keywords):
+                    profit_col = col
+                    break
+            
+            # 매출이익금 컬럼을 찾지 못한 경우 N열(인덱스 13) 시도
+            if profit_col is None:
+                n_column_index = 13  # N열은 14번째 (0-based index: 13)
+                if len(df_analysis.columns) > n_column_index:
+                    profit_col = df_analysis.columns[n_column_index]
+            
+            # 매출이익금 추가 (있는 경우)
+            if profit_col and profit_col in df_analysis.columns:
+                # 매출이익금이 숫자형이 아니면 변환
+                if df_analysis[profit_col].dtype == 'object':
+                    df_analysis[profit_col] = pd.to_numeric(df_analysis[profit_col], errors='coerce')
+                
+                # 상품코드별 매출이익금 집계
+                product_profit = df_analysis.groupby(product_code_col)[profit_col].sum().reset_index()
+                product_profit.columns = ['상품코드', '매출이익금']
+                
+                # 판매수량 데이터에 매출이익금 병합
+                product_sales = product_sales.merge(product_profit, on='상품코드', how='left')
+                product_sales['매출이익금'] = product_sales['매출이익금'].fillna(0)
+            
+            # 판매수량으로 정렬 (유지)
+            product_sales = product_sales.sort_values('판매수량', ascending=False)
+            
+            # 표시 컬럼 설정
+            if product_name_col:
+                if profit_col and profit_col in df_analysis.columns:
+                    display_cols = ['업체명', '상품코드', '상품명', '판매수량', '매출이익금']
+                else:
+                    display_cols = ['업체명', '상품코드', '상품명', '판매수량']
             else:
-                display_cols = ['업체명', '상품코드', '판매수량']
+                if profit_col and profit_col in df_analysis.columns:
+                    display_cols = ['업체명', '상품코드', '판매수량', '매출이익금']
+                else:
+                    display_cols = ['업체명', '상품코드', '판매수량']
             
             # 표시용 데이터 준비
             product_sales_display = product_sales.copy()
             product_sales_display['판매수량'] = product_sales_display['판매수량'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
+            if '매출이익금' in product_sales_display.columns:
+                product_sales_display['매출이익금'] = product_sales_display['매출이익금'].apply(
+                    lambda x: f"{int(x):,}" if pd.notna(x) and not pd.isna(x) else "0"
+                )
             
             period_label = selected_period if selected_period != "전체" else "2025.01 ~ 현재 누적"
             st.info(f"📊 {period_label} 상품코드별 판매수량 분석 (총 {len(product_sales)}개 상품)")
@@ -2514,13 +2564,58 @@ if uploaded_file is not None:
                         product_name_mapping = df_samsung.groupby(product_code_col)[product_name_col].first().to_dict()
                         product_sales['상품명'] = product_sales['상품코드'].map(product_name_mapping)
                         product_sales['상품명'] = product_sales['상품명'].fillna(product_sales['상품코드'])
-                        display_cols = ['업체명', '상품코드', '상품명', '판매수량']
+                    
+                    # 매출이익금 컬럼 찾기 및 추가
+                    profit_col = None
+                    profit_keywords = ['매출이익금', '이익금', 'profit', 'Profit', 'PROFIT', '매출이익', '이익', '수익', '수익금', 'GP', 'gp']
+                    for col in df_analysis.columns:
+                        col_str = str(col).lower()
+                        if any(keyword in col_str for keyword in profit_keywords):
+                            profit_col = col
+                            break
+                    
+                    # 매출이익금 컬럼을 찾지 못한 경우 N열(인덱스 13) 시도
+                    if profit_col is None:
+                        n_column_index = 13  # N열은 14번째 (0-based index: 13)
+                        if len(df_analysis.columns) > n_column_index:
+                            profit_col = df_analysis.columns[n_column_index]
+                    
+                    # 매출이익금 추가 (있는 경우)
+                    if profit_col and profit_col in df_samsung.columns:
+                        # 매출이익금이 숫자형이 아니면 변환
+                        if df_samsung[profit_col].dtype == 'object':
+                            df_samsung[profit_col] = pd.to_numeric(df_samsung[profit_col], errors='coerce')
+                        
+                        # 상품코드별 매출이익금 집계
+                        product_profit = df_samsung.groupby(product_code_col)[profit_col].sum().reset_index()
+                        product_profit.columns = ['상품코드', '매출이익금']
+                        
+                        # 판매수량 데이터에 매출이익금 병합
+                        product_sales = product_sales.merge(product_profit, on='상품코드', how='left')
+                        product_sales['매출이익금'] = product_sales['매출이익금'].fillna(0)
+                    
+                    # 판매수량으로 정렬 (유지)
+                    product_sales = product_sales.sort_values('판매수량', ascending=False)
+                    
+                    # 표시 컬럼 설정
+                    if product_name_col:
+                        if profit_col and profit_col in df_samsung.columns:
+                            display_cols = ['업체명', '상품코드', '상품명', '판매수량', '매출이익금']
+                        else:
+                            display_cols = ['업체명', '상품코드', '상품명', '판매수량']
                     else:
-                        display_cols = ['업체명', '상품코드', '판매수량']
+                        if profit_col and profit_col in df_samsung.columns:
+                            display_cols = ['업체명', '상품코드', '판매수량', '매출이익금']
+                        else:
+                            display_cols = ['업체명', '상품코드', '판매수량']
                     
                     # 표시용 데이터 준비
                     product_sales_display = product_sales.copy()
                     product_sales_display['판매수량'] = product_sales_display['판매수량'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
+                    if '매출이익금' in product_sales_display.columns:
+                        product_sales_display['매출이익금'] = product_sales_display['매출이익금'].apply(
+                            lambda x: f"{int(x):,}" if pd.notna(x) and not pd.isna(x) else "0"
+                        )
                     
                     period_label = selected_period if selected_period != "전체" else "2025.01 ~ 현재 누적"
                     st.info(f"📊 {period_label} 삼성베네포유 플랫폼 기준 상품코드별 판매수량 분석 (총 {len(product_sales)}개 상품)")
