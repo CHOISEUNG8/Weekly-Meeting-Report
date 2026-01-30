@@ -23,6 +23,56 @@ st.set_page_config(
 )
 
 st.title("📊 주간 회의록 대시보드")
+
+# 상단 고정 메뉴 구현
+st.markdown("""
+    <style>
+    .stApp {
+        margin-top: 50px;
+    }
+    .nav-container {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        background-color: white;
+        padding: 10px 0;
+        z-index: 999;
+        border-bottom: 1px solid #ddd;
+        display: flex;
+        justify-content: center;
+        gap: 20px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    .nav-item {
+        text-decoration: none;
+        color: #31333F;
+        font-weight: 600;
+        padding: 5px 15px;
+        border-radius: 5px;
+        transition: background-color 0.3s;
+    }
+    .nav-item:hover {
+        background-color: #f0f2f6;
+        color: #ff4b4b;
+    }
+    /* 앵커 위치 조정을 위한 스타일 */
+    .anchor {
+        display: block;
+        position: relative;
+        top: -100px;
+        visibility: hidden;
+    }
+    </style>
+    
+    <div class="nav-container">
+        <a class="nav-item" href="#section_target">📊 통계/현황</a>
+        <a class="nav-item" href="#section_sales">📦 상품 분석</a>
+        <a class="nav-item" href="#section_data_analysis">📈 데이터 분석</a>
+        <a class="nav-item" href="#section_plans">📝 파트별 계획</a>
+    </div>
+    """, unsafe_allow_html=True)
+
 st.markdown("---")
 
 # 메모 저장/로드 함수
@@ -344,175 +394,176 @@ if uploaded_file is not None:
                 company_summary.columns = [company_col, '총상담건수']
                 company_summary = company_summary.sort_values('총상담건수', ascending=False)
                 
-                # 통계 카드
-                col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-                with col_stat1:
-                    st.metric("총 업체 수", len(company_summary))
-                with col_stat2:
-                    st.metric("총 상담 건수", f"{company_summary['총상담건수'].sum():,}건")
-                with col_stat3:
-                    if manager_col:
-                        unique_managers = df[manager_col].nunique()
-                        st.metric("담당자 수", f"{unique_managers}명")
-                with col_stat4:
-                    # 파트별 통계
-                    part_counts = df['파트'].value_counts()
-                    st.metric("파트 수", f"{len(part_counts)}개")
-                
-                st.markdown("---")
-                
-                # 업체별 상담내역 담당자 테이블
-                st.markdown("#### 📋 업체별 상담내역 담당자")
-                
-                # 검색 기능
-                search_company = st.text_input("🔍 업체명 검색", "", placeholder="업체명을 입력하세요...")
-                
-                if search_company:
-                    filtered_data = company_manager[company_manager[company_col].astype(str).str.contains(search_company, case=False, na=False)]
-                    st.info(f"검색 결과: {len(filtered_data)}건")
-                else:
-                    filtered_data = company_manager
-                
-                # 테이블 표시 (파트 컬럼 포함)
-                display_columns = [company_col, '파트', manager_col, '상담건수']
-                if consultation_col:
-                    # 상담내역이 있으면 추가
-                    consultation_summary = df.groupby([company_col, '파트', manager_col])[consultation_col].apply(lambda x: ' | '.join(x.dropna().astype(str).unique()[:3])).reset_index()
-                    consultation_summary.columns = [company_col, '파트', manager_col, '상담내역_요약']
-                    filtered_data = filtered_data.merge(consultation_summary, on=[company_col, '파트', manager_col], how='left')
-                    display_columns.append('상담내역_요약')
-                
-                # 천단위 구분 기호 적용
-                filtered_data_display = filtered_data.copy()
-                filtered_data_display['상담건수'] = filtered_data_display['상담건수'].apply(lambda x: f"{x:,}건")
-                
-                st.dataframe(
-                    filtered_data_display[display_columns],
-                    use_container_width=True,
-                    height=400
-                )
-                
+            # 통계 카드
+            st.markdown('<span id="section_stats" class="anchor"></span>', unsafe_allow_html=True)
+            col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+            with col_stat1:
+                st.metric("총 업체 수", len(company_summary))
+            with col_stat2:
+                st.metric("총 상담 건수", f"{company_summary['총상담건수'].sum():,}건")
+            with col_stat3:
+                if manager_col:
+                    unique_managers = df[manager_col].nunique()
+                    st.metric("담당자 수", f"{unique_managers}명")
+            with col_stat4:
                 # 파트별 통계
-                st.markdown("---")
-                st.markdown("#### 📊 파트별 통계")
-                
-                col_part1, col_part2 = st.columns(2)
-                
-                with col_part1:
-                    # 파트별 상담건수
-                    part_summary = df.groupby('파트').size().reset_index(name='상담건수')
-                    part_summary = part_summary.sort_values('상담건수', ascending=False)
-                    fig_parts = px.bar(
-                        part_summary,
-                        x='파트',
-                        y='상담건수',
-                        title='파트별 상담건수',
-                        labels={'파트': '파트', '상담건수': '상담건수'},
-                        color='상담건수',
-                        color_continuous_scale='Blues'
-                    )
-                    fig_parts.update_layout(
-                        xaxis_title="파트",
-                        yaxis_title="상담건수",
-                        showlegend=False
-                    )
-                    fig_parts.update_traces(
-                        hovertemplate='<b>%{x}</b><br>상담건수: %{y}건<extra></extra>'
-                    )
-                    st.plotly_chart(fig_parts, use_container_width=True)
-                
-                with col_part2:
-                    # 파트별 비율 (파이 차트)
-                    part_counts = df['파트'].value_counts()
-                    fig_part_pie = px.pie(
-                        values=part_counts.values,
-                        names=part_counts.index,
-                        title='파트별 상담건수 비율',
-                        hole=0.4
-                    )
-                    fig_part_pie.update_traces(textposition='inside', textinfo='percent+label')
-                    st.plotly_chart(fig_part_pie, use_container_width=True)
-                
-                # 업체별 담당자 분포 차트
-                st.markdown("---")
-                st.markdown("#### 📊 업체별 담당자 분포")
-                
-                col_chart1, col_chart2 = st.columns(2)
-                
-                with col_chart1:
-                    # 업체별 총 상담건수 (상위 10개)
-                    top_companies = company_summary.head(10)
-                    fig_companies = px.bar(
-                        top_companies,
-                        x=company_col,
-                        y='총상담건수',
-                        title='업체별 총 상담건수 (상위 10개)',
-                        labels={company_col: '업체', '총상담건수': '상담건수'},
-                        color='총상담건수',
-                        color_continuous_scale='Blues'
-                    )
-                    fig_companies.update_layout(
-                        xaxis_title="업체",
-                        yaxis_title="상담건수",
-                        showlegend=False,
-                        xaxis_tickangle=-45
-                    )
-                    fig_companies.update_traces(
-                        hovertemplate='<b>%{x}</b><br>상담건수: %{y}건<extra></extra>'
-                    )
-                    st.plotly_chart(fig_companies, use_container_width=True)
-                
-                with col_chart2:
-                    # 담당자별 상담건수 (상위 10개)
-                    manager_summary = df.groupby(manager_col).size().reset_index(name='상담건수')
-                    manager_summary = manager_summary.sort_values('상담건수', ascending=False).head(10)
-                    fig_managers = px.bar(
-                        manager_summary,
-                        x=manager_col,
-                        y='상담건수',
-                        title='담당자별 상담건수 (상위 10개)',
-                        labels={manager_col: '담당자', '상담건수': '상담건수'},
-                        color='상담건수',
-                        color_continuous_scale='Greens'
-                    )
-                    fig_managers.update_layout(
-                        xaxis_title="담당자",
-                        yaxis_title="상담건수",
-                        showlegend=False,
-                        xaxis_tickangle=-45
-                    )
-                    fig_managers.update_traces(
-                        hovertemplate='<b>%{x}</b><br>상담건수: %{y}건<extra></extra>'
-                    )
-                    st.plotly_chart(fig_managers, use_container_width=True)
-                
-                # 다운로드 버튼
-                st.markdown("---")
-                col_dl1, col_dl2 = st.columns(2)
-                
-                with col_dl1:
-                    csv = filtered_data[display_columns].to_csv(index=False).encode('utf-8-sig')
-                    st.download_button(
-                        label="📥 CSV 다운로드",
-                        data=csv,
-                        file_name=f"스마트공장_업체별상담내역_{datetime.now().strftime('%Y%m%d')}.csv",
-                        mime="text/csv"
-                    )
-                
-                with col_dl2:
-                    from io import BytesIO
-                    output = BytesIO()
-                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        filtered_data[display_columns].to_excel(writer, index=False, sheet_name='업체별상담내역')
-                    st.download_button(
-                        label="📥 Excel 다운로드",
-                        data=output.getvalue(),
-                        file_name=f"스마트공장_업체별상담내역_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
+                part_counts = df['파트'].value_counts()
+                st.metric("파트 수", f"{len(part_counts)}개")
             
+            st.markdown("---")
+            
+            # 업체별 상담내역 담당자 테이블
+            st.markdown("#### 📋 업체별 상담내역 담당자")
+            
+            # 검색 기능
+            search_company = st.text_input("🔍 업체명 검색", "", placeholder="업체명을 입력하세요...")
+            
+            if search_company:
+                filtered_data = company_manager[company_manager[company_col].astype(str).str.contains(search_company, case=False, na=False)]
+                st.info(f"검색 결과: {len(filtered_data)}건")
             else:
-                st.warning("⚠️ 업체 컬럼과 담당자 컬럼을 선택해주세요.")
+                filtered_data = company_manager
+            
+            # 테이블 표시 (파트 컬럼 포함)
+            display_columns = [company_col, '파트', manager_col, '상담건수']
+            if consultation_col:
+                # 상담내역이 있으면 추가
+                consultation_summary = df.groupby([company_col, '파트', manager_col])[consultation_col].apply(lambda x: ' | '.join(x.dropna().astype(str).unique()[:3])).reset_index()
+                consultation_summary.columns = [company_col, '파트', manager_col, '상담내역_요약']
+                filtered_data = filtered_data.merge(consultation_summary, on=[company_col, '파트', manager_col], how='left')
+                display_columns.append('상담내역_요약')
+            
+            # 천단위 구분 기호 적용
+            filtered_data_display = filtered_data.copy()
+            filtered_data_display['상담건수'] = filtered_data_display['상담건수'].apply(lambda x: f"{x:,}건")
+            
+            st.dataframe(
+                filtered_data_display[display_columns],
+                use_container_width=True,
+                height=400
+            )
+            
+            # 파트별 통계
+            st.markdown("---")
+            st.markdown("#### 📊 파트별 통계")
+            
+            col_part1, col_part2 = st.columns(2)
+            
+            with col_part1:
+                # 파트별 상담건수
+                part_summary = df.groupby('파트').size().reset_index(name='상담건수')
+                part_summary = part_summary.sort_values('상담건수', ascending=False)
+                fig_parts = px.bar(
+                    part_summary,
+                    x='파트',
+                    y='상담건수',
+                    title='파트별 상담건수',
+                    labels={'파트': '파트', '상담건수': '상담건수'},
+                    color='상담건수',
+                    color_continuous_scale='Blues'
+                )
+                fig_parts.update_layout(
+                    xaxis_title="파트",
+                    yaxis_title="상담건수",
+                    showlegend=False
+                )
+                fig_parts.update_traces(
+                    hovertemplate='<b>%{x}</b><br>상담건수: %{y}건<extra></extra>'
+                )
+                st.plotly_chart(fig_parts, use_container_width=True)
+            
+            with col_part2:
+                # 파트별 비율 (파이 차트)
+                part_counts = df['파트'].value_counts()
+                fig_part_pie = px.pie(
+                    values=part_counts.values,
+                    names=part_counts.index,
+                    title='파트별 상담건수 비율',
+                    hole=0.4
+                )
+                fig_part_pie.update_traces(textposition='inside', textinfo='percent+label')
+                st.plotly_chart(fig_part_pie, use_container_width=True)
+            
+            # 업체별 담당자 분포 차트
+            st.markdown("---")
+            st.markdown("#### 📊 업체별 담당자 분포")
+            
+            col_chart1, col_chart2 = st.columns(2)
+            
+            with col_chart1:
+                # 업체별 총 상담건수 (상위 10개)
+                top_companies = company_summary.head(10)
+                fig_companies = px.bar(
+                    top_companies,
+                    x=company_col,
+                    y='총상담건수',
+                    title='업체별 총 상담건수 (상위 10개)',
+                    labels={company_col: '업체', '총상담건수': '상담건수'},
+                    color='총상담건수',
+                    color_continuous_scale='Blues'
+                )
+                fig_companies.update_layout(
+                    xaxis_title="업체",
+                    yaxis_title="상담건수",
+                    showlegend=False,
+                    xaxis_tickangle=-45
+                )
+                fig_companies.update_traces(
+                    hovertemplate='<b>%{x}</b><br>상담건수: %{y}건<extra></extra>'
+                )
+                st.plotly_chart(fig_companies, use_container_width=True)
+            
+            with col_chart2:
+                # 담당자별 상담건수 (상위 10개)
+                manager_summary = df.groupby(manager_col).size().reset_index(name='상담건수')
+                manager_summary = manager_summary.sort_values('상담건수', ascending=False).head(10)
+                fig_managers = px.bar(
+                    manager_summary,
+                    x=manager_col,
+                    y='상담건수',
+                    title='담당자별 상담건수 (상위 10개)',
+                    labels={manager_col: '담당자', '상담건수': '상담건수'},
+                    color='상담건수',
+                    color_continuous_scale='Greens'
+                )
+                fig_managers.update_layout(
+                    xaxis_title="담당자",
+                    yaxis_title="상담건수",
+                    showlegend=False,
+                    xaxis_tickangle=-45
+                )
+                fig_managers.update_traces(
+                    hovertemplate='<b>%{x}</b><br>상담건수: %{y}건<extra></extra>'
+                )
+                st.plotly_chart(fig_managers, use_container_width=True)
+            
+            # 다운로드 버튼
+            st.markdown("---")
+            col_dl1, col_dl2 = st.columns(2)
+            
+            with col_dl1:
+                csv = filtered_data[display_columns].to_csv(index=False).encode('utf-8-sig')
+                st.download_button(
+                    label="📥 CSV 다운로드",
+                    data=csv,
+                    file_name=f"스마트공장_업체별상담내역_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv"
+                )
+            
+            with col_dl2:
+                from io import BytesIO
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    filtered_data[display_columns].to_excel(writer, index=False, sheet_name='업체별상담내역')
+                st.download_button(
+                    label="📥 Excel 다운로드",
+                    data=output.getvalue(),
+                    file_name=f"스마트공장_업체별상담내역_{datetime.now().strftime('%Y%m%d')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+        
+        else:
+            st.warning("⚠️ 업체 컬럼과 담당자 컬럼을 선택해주세요.")
         
         # 일반 시트인 경우 기존 로직 실행
         if not is_smart_factory:
@@ -867,6 +918,7 @@ if uploaded_file is not None:
                     month_label = "월"
             else:
                 month_label = "월"
+            st.markdown('<span id="section_target" class="anchor"></span>', unsafe_allow_html=True)
             st.subheader(f"🎯 {month_label} 목표 달성 현황")
             
             # 목표 설정 (년도별, 월별)
@@ -1124,6 +1176,7 @@ if uploaded_file is not None:
         st.markdown("---")
         
         # 월간 KPI 요약
+        # st.markdown('<span id="section_stats" class="anchor"></span>', unsafe_allow_html=True)
         st.subheader("📊 월간 KPI 요약")
         
         # J열 찾기 (총 매출, 10번째 컬럼, 인덱스 9)
@@ -1204,6 +1257,141 @@ if uploaded_file is not None:
                 st.markdown("**이익률(GP%):** 계산 불가")
         
         st.markdown("---")
+
+        # 엑셀 로우 데이터 기반 상품 분석
+        st.markdown('<span id="section_sales" class="anchor"></span>', unsafe_allow_html=True)
+        st.subheader("📦 상품 분석")
+
+        # 상품코드 컬럼 찾기
+        product_code_col = None
+        product_code_keywords = ['상품코드', 'product', 'code', '코드', '상품', '제품코드', '상품 코드', '제품 코드']
+        for col in df.columns:
+            col_str = str(col).lower()
+            if any(keyword in col_str for keyword in product_code_keywords) and '상품명' not in col_str and '상품이름' not in col_str:
+                product_code_col = col
+                break
+
+        # 상품코드 컬럼을 찾지 못한 경우 C열(인덱스 2) 또는 D열(인덱스 3) 시도
+        if product_code_col is None:
+            if len(df.columns) > 2:
+                product_code_col = df.columns[2]  # C열
+            elif len(df.columns) > 3:
+                product_code_col = df.columns[3]  # D열
+
+        # 상품명 컬럼 찾기
+        product_name_col = None
+        product_name_keywords = ['상품명', 'product name', '품명', 'name', '제품명', '상품이름']
+        for col in df.columns:
+            col_str = str(col).lower()
+            if any(keyword in col_str for keyword in product_name_keywords):
+                product_name_col = col
+                break
+
+        # 판매 수량 컬럼 찾기
+        sales_qty_col = None
+        sales_qty_keywords = ['판매수량', '판매 수량', '수량', 'quantity', 'qty', '판매량', 'sales', 'quantity']
+        for col in df.columns:
+            col_str = str(col).lower()
+            if any(keyword in col_str for keyword in sales_qty_keywords):
+                sales_qty_col = col
+                break
+
+        # 판매 수량 컬럼을 찾지 못한 경우 I열(인덱스 8) 시도
+        if sales_qty_col is None:
+            i_column_index = 8  # I열은 9번째 (0-based index: 8)
+            if len(df.columns) > i_column_index:
+                sales_qty_col = df.columns[i_column_index]
+
+        # 매출이익금 컬럼 찾기 (amount_col 사용)
+        profit_col = amount_col if amount_col is not None else None
+
+        # 상품 분석이 가능한지 확인
+        if product_code_col and sales_qty_col:
+            # 데이터 타입 변환
+            if df[sales_qty_col].dtype == 'object':
+                df[sales_qty_col] = pd.to_numeric(df[sales_qty_col], errors='coerce')
+            if profit_col and df[profit_col].dtype == 'object':
+                df[profit_col] = pd.to_numeric(df[profit_col], errors='coerce')
+
+            # 1. 많이 판매된 상품 TOP 10 (판매수량 기준)
+            st.markdown("#### 🏆 많이 판매된 상품 TOP 10")
+            product_sales_qty = df.groupby(product_code_col)[sales_qty_col].sum().reset_index()
+            product_sales_qty.columns = ['상품코드', '총판매수량']
+            product_sales_qty = product_sales_qty.sort_values('총판매수량', ascending=False).head(10)
+
+            # 상품명 추가
+            if product_name_col:
+                product_name_mapping = df.groupby(product_code_col)[product_name_col].apply(lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.iloc[0]).to_dict()
+                product_sales_qty['상품명'] = product_sales_qty['상품코드'].map(product_name_mapping)
+                product_sales_qty['상품명'] = product_sales_qty['상품명'].fillna(product_sales_qty['상품코드'])
+                display_cols = ['상품명', '총판매수량']
+            else:
+                product_sales_qty['상품명'] = product_sales_qty['상품코드']
+                display_cols = ['상품명', '총판매수량']
+
+            # 표시용 데이터 포맷팅
+            product_sales_qty_display = product_sales_qty.copy()
+            product_sales_qty_display['총판매수량'] = product_sales_qty_display['총판매수량'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
+
+            st.dataframe(product_sales_qty_display[display_cols], use_container_width=True, hide_index=True)
+
+            # 2. 대량으로 판매된 상품 (개별 판매수량이 큰 상품들)
+            st.markdown("#### 📦 대량 판매 상품 TOP 10")
+            # 개별 거래에서 판매수량이 큰 것들만 필터링 (예: 100개 이상)
+            large_qty_threshold = 50  # 임계값 설정
+            large_qty_products = df[df[sales_qty_col] >= large_qty_threshold].copy()
+
+            if len(large_qty_products) > 0:
+                large_qty_summary = large_qty_products.groupby(product_code_col)[sales_qty_col].sum().reset_index()
+                large_qty_summary.columns = ['상품코드', '총판매수량']
+                large_qty_summary = large_qty_summary.sort_values('총판매수량', ascending=False).head(10)
+
+                # 상품명 추가
+                if product_name_col:
+                    large_qty_summary['상품명'] = large_qty_summary['상품코드'].map(product_name_mapping)
+                    large_qty_summary['상품명'] = large_qty_summary['상품명'].fillna(large_qty_summary['상품코드'])
+                    display_cols = ['상품명', '총판매수량']
+                else:
+                    large_qty_summary['상품명'] = large_qty_summary['상품코드']
+                    display_cols = ['상품명', '총판매수량']
+
+                # 표시용 데이터 포맷팅
+                large_qty_display = large_qty_summary.copy()
+                large_qty_display['총판매수량'] = large_qty_display['총판매수량'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
+
+                st.dataframe(large_qty_display[display_cols], use_container_width=True, hide_index=True)
+            else:
+                st.info(f"판매수량 {large_qty_threshold}개 이상인 상품이 없습니다.")
+
+            # 3. 매출이익금이 높은 상품 TOP 10
+            if profit_col:
+                st.markdown("#### 💰 매출이익금이 높은 상품 TOP 10")
+                product_profit = df.groupby(product_code_col)[profit_col].sum().reset_index()
+                product_profit.columns = ['상품코드', '총매출이익금']
+                product_profit = product_profit.sort_values('총매출이익금', ascending=False).head(10)
+
+                # 상품명 추가
+                if product_name_col:
+                    product_profit['상품명'] = product_profit['상품코드'].map(product_name_mapping)
+                    product_profit['상품명'] = product_profit['상품명'].fillna(product_profit['상품코드'])
+                    display_cols = ['상품명', '총매출이익금']
+                else:
+                    product_profit['상품명'] = product_profit['상품코드']
+                    display_cols = ['상품명', '총매출이익금']
+
+                # 표시용 데이터 포맷팅
+                product_profit_display = product_profit.copy()
+                product_profit_display['총매출이익금'] = product_profit_display['총매출이익금'].apply(lambda x: f"{x:,.0f}원" if pd.notna(x) else "0원")
+
+                st.dataframe(product_profit_display[display_cols], use_container_width=True, hide_index=True)
+            else:
+                st.warning("⚠️ 매출이익금 컬럼을 찾을 수 없어 매출이익금 분석을 할 수 없습니다.")
+
+        else:
+            st.warning("⚠️ 상품코드 또는 판매수량 컬럼을 찾을 수 없어 상품 분석을 할 수 없습니다.")
+
+        st.markdown('<span id="section_data_analysis" class="anchor"></span>', unsafe_allow_html=True)
+        st.markdown("---")
         
         # 선택된 월 데이터 분석 차트
         # month_label 설정: selected_month가 있으면 사용, 없으면 필터링된 데이터에서 월 추출
@@ -1218,7 +1406,7 @@ if uploaded_file is not None:
                 month_label = "월"
         else:
             month_label = "월"
-        st.subheader(f"📊 {month_label} 데이터 분석")
+        st.subheader("📊 1월 데이터 분석")
         
         # 주차 번호를 한국어로 변환하는 함수
         def week_to_korean(week_num, min_week=None, month=None, max_week=None):
@@ -1889,7 +2077,109 @@ if uploaded_file is not None:
             st.warning("⚠️ 플랫폼 컬럼(A열) 또는 매출 컬럼(J열)을 찾을 수 없습니다.")
         
         st.markdown("---")
-        
+
+        # 삼성(베네포유+카드몰) vs 타 폐쇄몰 vs 2파트 폐쇄몰 매출이익금 비교 (플랫폼별 분석 섹션 위)
+        if amount_col is not None and len(df) > 0:
+            # 플랫폼 컬럼(A열) 찾기
+            platform_col_for_group = df.columns[0] if len(df.columns) > 0 else None
+
+            # 파트 컬럼 확인/생성 (플랫폼별 분석 섹션과 동일 로직)
+            part_col_for_group = None
+            part_columns_for_group = [col for col in df.columns if any(keyword in str(col).lower() for keyword in ['파트', 'part'])]
+            manager_columns_for_group = [
+                col for col in df.columns
+                if any(keyword in str(col).lower() for keyword in ['담당자', 'manager', '담당', '담당인', 'contact', '담당자명'])
+            ]
+
+            if part_columns_for_group:
+                part_col_for_group = part_columns_for_group[0]
+            elif manager_columns_for_group:
+                def manager_to_part_for_group(manager_name):
+                    """담당자 이름을 파트로 변환"""
+                    if pd.isna(manager_name):
+                        return '1파트'
+                    manager_str = str(manager_name).strip()
+                    # 맹기열 → 2파트
+                    if '맹기열' in manager_str:
+                        return '2파트'
+                    # 나머지 모든 담당자 → 1파트
+                    return '1파트'
+
+                manager_col_for_part_group = manager_columns_for_group[0]
+                if '파트' not in df.columns:
+                    df['파트'] = df[manager_col_for_part_group].apply(manager_to_part_for_group)
+                part_col_for_group = '파트'
+
+            if platform_col_for_group is not None:
+                profit_col_for_group = amount_col
+                if df[profit_col_for_group].dtype == 'object':
+                    df[profit_col_for_group] = pd.to_numeric(df[profit_col_for_group], errors='coerce')
+
+                platform_series = df[platform_col_for_group].astype(str)
+                platform_norm = platform_series.str.replace(' ', '', regex=False).str.lower()
+
+                # 삼성 베네포유 / 삼성 카드몰 매칭 (공백 제거 후 비교)
+                samsung_keys = ['삼성베네포유', '베네포유', '삼성카드몰', '카드몰']
+                samsung_mask = platform_norm.apply(lambda x: any(k in x for k in samsung_keys))
+
+                samsung_profit = df.loc[samsung_mask, profit_col_for_group].sum(skipna=True)
+
+                if part_col_for_group and part_col_for_group in df.columns:
+                    part_norm = df[part_col_for_group].astype(str).str.replace(' ', '', regex=False)
+                    one_part_mask = part_norm.str.contains('1파트', na=False, regex=False)
+                    two_part_mask = part_norm.str.contains('2파트', na=False, regex=False)
+                    other_mall_profit_1part = df.loc[one_part_mask & (~samsung_mask), profit_col_for_group].sum(skipna=True)
+                    other_mall_profit_2part = df.loc[two_part_mask & (~samsung_mask), profit_col_for_group].sum(skipna=True)
+                    group_note = None
+                else:
+                    # 파트 컬럼이 없으면 "나머지 몰"을 전체 기준으로 계산
+                    other_mall_profit_1part = df.loc[~samsung_mask, profit_col_for_group].sum(skipna=True)
+                    other_mall_profit_2part = 0.0
+                    group_note = "※ 파트 컬럼을 찾지 못해 ‘나머지 몰’은 전체 기준으로 집계했습니다."
+
+                compare_df = pd.DataFrame({
+                    '구분': ['삼성(베네포유+카드몰)', '타 폐쇄몰', '2파트 폐쇄몰'],
+                    '매출이익금': [
+                        float(samsung_profit) if pd.notna(samsung_profit) else 0.0,
+                        float(other_mall_profit_1part) if pd.notna(other_mall_profit_1part) else 0.0,
+                        float(other_mall_profit_2part) if pd.notna(other_mall_profit_2part) else 0.0
+                    ]
+                })
+
+                fig_profit_compare = px.bar(
+                    compare_df,
+                    x='구분',
+                    y='매출이익금',
+                    text='매출이익금',
+                    title=f'{month_label} 매출이익금 비교 (삼성 vs 타 폐쇄몰 vs 2파트 폐쇄몰)',
+                    color='구분',
+                    color_discrete_map={
+                        '삼성(베네포유+카드몰)': '#87CEEB',  # 파스텔 블루
+                        '타 폐쇄몰': '#A5D6A7',              # 파스텔 그린
+                        '2파트 폐쇄몰': '#FFB6C1'             # 파스텔 핑크
+                    }
+                )
+                fig_profit_compare.update_traces(
+                    texttemplate='%{text:,.0f}원',
+                    textposition='outside',
+                    hovertemplate='<b>%{x}</b><br>매출이익금: %{y:,.0f}원<extra></extra>'
+                )
+                fig_profit_compare.update_layout(
+                    yaxis_title="매출이익금 (원)",
+                    xaxis_title="",
+                    showlegend=False,
+                    margin=dict(t=60, r=20, b=40, l=20)
+                )
+                fig_profit_compare.update_yaxes(tickformat=',')
+
+                st.plotly_chart(fig_profit_compare, use_container_width=True)
+                if group_note:
+                    st.info(group_note)
+            else:
+                st.warning("⚠️ 플랫폼 컬럼(A열)을 찾을 수 없어 '삼성 vs 타 폐쇄몰 vs 2파트 폐쇄몰' 비교를 표시할 수 없습니다.")
+        else:
+            st.info("매출이익금(N열) 데이터가 없어 '삼성 vs 타 폐쇄몰 vs 2파트 폐쇄몰' 비교를 표시할 수 없습니다.")
+
         # 플랫폼별 비교
         # month_label 설정: selected_month가 있으면 사용, 없으면 필터링된 데이터에서 월 추출
         if selected_month is not None:
@@ -2247,6 +2537,7 @@ if uploaded_file is not None:
         # st.dataframe(display_df, use_container_width=True, height=400)
         
         # 핵심 매출 기여 상품 분석 (삼성베네포유 플랫폼 기준)
+        st.markdown('<span id="section_sales" class="anchor"></span>', unsafe_allow_html=True)
         st.markdown("---")
         st.markdown("#### 💎 핵심 매출 기여 상품 분석")
         
@@ -2385,8 +2676,12 @@ if uploaded_file is not None:
                 for q in available_quarters:
                     period_options.append(f"2025년 {q}분기")
         
-        # 기간 선택
-        selected_period = st.selectbox("기간 선택", period_options, key='period_select')
+        # 기간 및 분석 기준 선택
+        col1, col2 = st.columns(2)
+        with col1:
+            selected_period = st.selectbox("기간 선택", period_options, key='period_select')
+        with col2:
+            analysis_criteria = st.selectbox("분석 기준 선택", ["판매수량", "매출이익금", "매출액"], key='analysis_criteria_select')
         
         # 선택된 기간에 따라 데이터 필터링
         df_analysis = None
@@ -2406,10 +2701,64 @@ if uploaded_file is not None:
             if df_analysis[sales_qty_col].dtype == 'object':
                 df_analysis[sales_qty_col] = pd.to_numeric(df_analysis[sales_qty_col], errors='coerce')
             
-            # 상품코드별 판매수량 집계 (판매가 많이 된 순서)
-            product_sales = df_analysis.groupby(product_code_col)[sales_qty_col].sum().reset_index()
-            product_sales.columns = ['상품코드', '판매수량']
-            product_sales = product_sales.sort_values('판매수량', ascending=False)  # 판매가 많이 된 순서
+            # 매출액 컬럼 찾기
+            revenue_col = None
+            revenue_keywords = ['매출액', '매출금액', '판매금액', 'revenue', 'sales_amount', 'amount']
+            for col in df_analysis.columns:
+                col_str = str(col).lower()
+                if any(keyword in col_str for keyword in revenue_keywords) and '이익' not in col_str:
+                    revenue_col = col
+                    break
+            
+            # 매출액 컬럼을 찾지 못한 경우 J열(인덱스 9) 시도
+            if revenue_col is None:
+                j_column_index = 9  # J열은 10번째 (0-based index: 9)
+                if len(df_analysis.columns) > j_column_index:
+                    revenue_col = df_analysis.columns[j_column_index]
+
+            # 매출이익금 컬럼 찾기
+            profit_col = None
+            profit_keywords = ['매출이익금', '이익금', 'profit', 'Profit', 'PROFIT', '매출이익', '이익', '수익', '수익금', 'GP', 'gp']
+            for col in df_analysis.columns:
+                col_str = str(col).lower()
+                if any(keyword in col_str for keyword in profit_keywords):
+                    profit_col = col
+                    break
+            
+            # 매출이익금 컬럼을 찾지 못한 경우 N열(인덱스 13) 시도
+            if profit_col is None:
+                n_column_index = 13  # N열은 14번째 (0-based index: 13)
+                if len(df_analysis.columns) > n_column_index:
+                    profit_col = df_analysis.columns[n_column_index]
+
+            # 데이터 타입 변환 (매출액, 매출이익금)
+            if revenue_col and df_analysis[revenue_col].dtype == 'object':
+                df_analysis[revenue_col] = pd.to_numeric(df_analysis[revenue_col], errors='coerce')
+            if profit_col and df_analysis[profit_col].dtype == 'object':
+                df_analysis[profit_col] = pd.to_numeric(df_analysis[profit_col], errors='coerce')
+
+            # 상품코드별 집계
+            agg_dict = {sales_qty_col: 'sum'}
+            if revenue_col:
+                agg_dict[revenue_col] = 'sum'
+            if profit_col:
+                agg_dict[profit_col] = 'sum'
+            
+            product_sales = df_analysis.groupby(product_code_col).agg(agg_dict).reset_index()
+            
+            # 컬럼명 정리
+            rename_dict = {product_code_col: '상품코드', sales_qty_col: '판매수량'}
+            if revenue_col:
+                rename_dict[revenue_col] = '매출액'
+            if profit_col:
+                rename_dict[profit_col] = '매출이익금'
+            product_sales = product_sales.rename(columns=rename_dict)
+            
+            # 선택된 기준에 따라 정렬
+            sort_col = analysis_criteria
+            if sort_col not in product_sales.columns:
+                sort_col = '판매수량'
+            product_sales = product_sales.sort_values(sort_col, ascending=False)
             
             # 업체명 컬럼 찾기
             company_col = None
@@ -2449,60 +2798,30 @@ if uploaded_file is not None:
                 product_sales['상품명'] = product_sales['상품코드'].map(product_name_mapping)
                 product_sales['상품명'] = product_sales['상품명'].fillna(product_sales['상품코드'])
             
-            # 매출이익금 컬럼 찾기 및 추가
-            profit_col = None
-            profit_keywords = ['매출이익금', '이익금', 'profit', 'Profit', 'PROFIT', '매출이익', '이익', '수익', '수익금', 'GP', 'gp']
-            for col in df_analysis.columns:
-                col_str = str(col).lower()
-                if any(keyword in col_str for keyword in profit_keywords):
-                    profit_col = col
-                    break
-            
-            # 매출이익금 컬럼을 찾지 못한 경우 N열(인덱스 13) 시도
-            if profit_col is None:
-                n_column_index = 13  # N열은 14번째 (0-based index: 13)
-                if len(df_analysis.columns) > n_column_index:
-                    profit_col = df_analysis.columns[n_column_index]
-            
-            # 매출이익금 추가 (있는 경우)
-            if profit_col and profit_col in df_analysis.columns:
-                # 매출이익금이 숫자형이 아니면 변환
-                if df_analysis[profit_col].dtype == 'object':
-                    df_analysis[profit_col] = pd.to_numeric(df_analysis[profit_col], errors='coerce')
-                
-                # 상품코드별 매출이익금 집계
-                product_profit = df_analysis.groupby(product_code_col)[profit_col].sum().reset_index()
-                product_profit.columns = ['상품코드', '매출이익금']
-                
-                # 판매수량 데이터에 매출이익금 병합
-                product_sales = product_sales.merge(product_profit, on='상품코드', how='left')
-                product_sales['매출이익금'] = product_sales['매출이익금'].fillna(0)
-            
-            # 판매수량으로 정렬 (유지)
-            product_sales = product_sales.sort_values('판매수량', ascending=False)
-            
             # 표시 컬럼 설정
-            if product_name_col:
-                if profit_col and profit_col in df_analysis.columns:
-                    display_cols = ['업체명', '상품코드', '상품명', '판매수량', '매출이익금']
-                else:
-                    display_cols = ['업체명', '상품코드', '상품명', '판매수량']
-            else:
-                if profit_col and profit_col in df_analysis.columns:
-                    display_cols = ['업체명', '상품코드', '판매수량', '매출이익금']
-                else:
-                    display_cols = ['업체명', '상품코드', '판매수량']
+            display_cols = ['업체명', '상품코드']
+            if '상품명' in product_sales.columns:
+                display_cols.append('상품명')
+            display_cols.append('판매수량')
+            if '매출액' in product_sales.columns:
+                display_cols.append('매출액')
+            if '매출이익금' in product_sales.columns:
+                display_cols.append('매출이익금')
             
             # 표시용 데이터 준비
             product_sales_display = product_sales.copy()
             product_sales_display['판매수량'] = product_sales_display['판매수량'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
+            if '매출액' in product_sales_display.columns:
+                product_sales_display['매출액'] = product_sales_display['매출액'].apply(
+                    lambda x: f"{int(x):,}" if pd.notna(x) and not pd.isna(x) else "0"
+                )
             if '매출이익금' in product_sales_display.columns:
                 product_sales_display['매출이익금'] = product_sales_display['매출이익금'].apply(
                     lambda x: f"{int(x):,}" if pd.notna(x) and not pd.isna(x) else "0"
                 )
             
             period_label = selected_period if selected_period != "전체" else "2025.01 ~ 현재 누적"
-            st.info(f"📊 {period_label} 상품코드별 판매수량 분석 (총 {len(product_sales)}개 상품)")
+            st.info(f"📊 {period_label} 상품코드별 {analysis_criteria} 분석 (총 {len(product_sales)}개 상품)")
             st.dataframe(product_sales_display[display_cols], use_container_width=True, height=400, hide_index=True)
         
         # 기존 방식: 플랫폼 필터링 후 집계
@@ -2518,14 +2837,64 @@ if uploaded_file is not None:
                 df_samsung = df_analysis[df_analysis[platform_col].astype(str).str.contains('|'.join(samsung_beneforyou_keywords), case=False, na=False, regex=True)]
                 
                 if len(df_samsung) > 0:
-                    # 판매수량이 숫자형이 아니면 변환
+                    # 데이터 타입 변환
                     if df_samsung[sales_qty_col].dtype == 'object':
                         df_samsung[sales_qty_col] = pd.to_numeric(df_samsung[sales_qty_col], errors='coerce')
                     
-                    # 상품코드별 판매수량 집계 (판매가 많이 된 순서)
-                    product_sales = df_samsung.groupby(product_code_col)[sales_qty_col].sum().reset_index()
-                    product_sales.columns = ['상품코드', '판매수량']
-                    product_sales = product_sales.sort_values('판매수량', ascending=False)  # 판매가 많이 된 순서
+                    # 매출액 컬럼 찾기
+                    revenue_col = None
+                    revenue_keywords = ['매출액', '매출금액', '판매금액', 'revenue', 'sales_amount', 'amount']
+                    for col in df_samsung.columns:
+                        col_str = str(col).lower()
+                        if any(keyword in col_str for keyword in revenue_keywords) and '이익' not in col_str:
+                            revenue_col = col
+                            break
+                    if revenue_col is None:
+                        j_column_index = 9
+                        if len(df_samsung.columns) > j_column_index:
+                            revenue_col = df_samsung.columns[j_column_index]
+
+                    # 매출이익금 컬럼 찾기
+                    profit_col = None
+                    profit_keywords = ['매출이익금', '이익금', 'profit', 'Profit', 'PROFIT', '매출이익', '이익', '수익', '수익금', 'GP', 'gp']
+                    for col in df_samsung.columns:
+                        col_str = str(col).lower()
+                        if any(keyword in col_str for keyword in profit_keywords):
+                            profit_col = col
+                            break
+                    if profit_col is None:
+                        n_column_index = 13
+                        if len(df_samsung.columns) > n_column_index:
+                            profit_col = df_samsung.columns[n_column_index]
+
+                    # 데이터 타입 변환 (매출액, 매출이익금)
+                    if revenue_col and df_samsung[revenue_col].dtype == 'object':
+                        df_samsung[revenue_col] = pd.to_numeric(df_samsung[revenue_col], errors='coerce')
+                    if profit_col and df_samsung[profit_col].dtype == 'object':
+                        df_samsung[profit_col] = pd.to_numeric(df_samsung[profit_col], errors='coerce')
+
+                    # 상품코드별 집계
+                    agg_dict = {sales_qty_col: 'sum'}
+                    if revenue_col:
+                        agg_dict[revenue_col] = 'sum'
+                    if profit_col:
+                        agg_dict[profit_col] = 'sum'
+                    
+                    product_sales = df_samsung.groupby(product_code_col).agg(agg_dict).reset_index()
+                    
+                    # 컬럼명 정리
+                    rename_dict = {product_code_col: '상품코드', sales_qty_col: '판매수량'}
+                    if revenue_col:
+                        rename_dict[revenue_col] = '매출액'
+                    if profit_col:
+                        rename_dict[profit_col] = '매출이익금'
+                    product_sales = product_sales.rename(columns=rename_dict)
+                    
+                    # 선택된 기준에 따라 정렬
+                    sort_col = analysis_criteria
+                    if sort_col not in product_sales.columns:
+                        sort_col = '판매수량'
+                    product_sales = product_sales.sort_values(sort_col, ascending=False)
                     
                     # 업체명 컬럼 찾기
                     company_col = None
@@ -2565,60 +2934,30 @@ if uploaded_file is not None:
                         product_sales['상품명'] = product_sales['상품코드'].map(product_name_mapping)
                         product_sales['상품명'] = product_sales['상품명'].fillna(product_sales['상품코드'])
                     
-                    # 매출이익금 컬럼 찾기 및 추가
-                    profit_col = None
-                    profit_keywords = ['매출이익금', '이익금', 'profit', 'Profit', 'PROFIT', '매출이익', '이익', '수익', '수익금', 'GP', 'gp']
-                    for col in df_analysis.columns:
-                        col_str = str(col).lower()
-                        if any(keyword in col_str for keyword in profit_keywords):
-                            profit_col = col
-                            break
-                    
-                    # 매출이익금 컬럼을 찾지 못한 경우 N열(인덱스 13) 시도
-                    if profit_col is None:
-                        n_column_index = 13  # N열은 14번째 (0-based index: 13)
-                        if len(df_analysis.columns) > n_column_index:
-                            profit_col = df_analysis.columns[n_column_index]
-                    
-                    # 매출이익금 추가 (있는 경우)
-                    if profit_col and profit_col in df_samsung.columns:
-                        # 매출이익금이 숫자형이 아니면 변환
-                        if df_samsung[profit_col].dtype == 'object':
-                            df_samsung[profit_col] = pd.to_numeric(df_samsung[profit_col], errors='coerce')
-                        
-                        # 상품코드별 매출이익금 집계
-                        product_profit = df_samsung.groupby(product_code_col)[profit_col].sum().reset_index()
-                        product_profit.columns = ['상품코드', '매출이익금']
-                        
-                        # 판매수량 데이터에 매출이익금 병합
-                        product_sales = product_sales.merge(product_profit, on='상품코드', how='left')
-                        product_sales['매출이익금'] = product_sales['매출이익금'].fillna(0)
-                    
-                    # 판매수량으로 정렬 (유지)
-                    product_sales = product_sales.sort_values('판매수량', ascending=False)
-                    
                     # 표시 컬럼 설정
-                    if product_name_col:
-                        if profit_col and profit_col in df_samsung.columns:
-                            display_cols = ['업체명', '상품코드', '상품명', '판매수량', '매출이익금']
-                        else:
-                            display_cols = ['업체명', '상품코드', '상품명', '판매수량']
-                    else:
-                        if profit_col and profit_col in df_samsung.columns:
-                            display_cols = ['업체명', '상품코드', '판매수량', '매출이익금']
-                        else:
-                            display_cols = ['업체명', '상품코드', '판매수량']
+                    display_cols = ['업체명', '상품코드']
+                    if '상품명' in product_sales.columns:
+                        display_cols.append('상품명')
+                    display_cols.append('판매수량')
+                    if '매출액' in product_sales.columns:
+                        display_cols.append('매출액')
+                    if '매출이익금' in product_sales.columns:
+                        display_cols.append('매출이익금')
                     
                     # 표시용 데이터 준비
                     product_sales_display = product_sales.copy()
                     product_sales_display['판매수량'] = product_sales_display['판매수량'].apply(lambda x: f"{int(x):,}" if pd.notna(x) else "0")
+                    if '매출액' in product_sales_display.columns:
+                        product_sales_display['매출액'] = product_sales_display['매출액'].apply(
+                            lambda x: f"{int(x):,}" if pd.notna(x) and not pd.isna(x) else "0"
+                        )
                     if '매출이익금' in product_sales_display.columns:
                         product_sales_display['매출이익금'] = product_sales_display['매출이익금'].apply(
                             lambda x: f"{int(x):,}" if pd.notna(x) and not pd.isna(x) else "0"
                         )
                     
                     period_label = selected_period if selected_period != "전체" else "2025.01 ~ 현재 누적"
-                    st.info(f"📊 {period_label} 삼성베네포유 플랫폼 기준 상품코드별 판매수량 분석 (총 {len(product_sales)}개 상품)")
+                    st.info(f"📊 {period_label} 삼성베네포유 플랫폼 기준 상품코드별 {analysis_criteria} 분석 (총 {len(product_sales)}개 상품)")
                     st.dataframe(product_sales_display[display_cols], use_container_width=True, height=400, hide_index=True)
                 else:
                     st.warning("⚠️ 삼성베네포유 플랫폼 데이터를 찾을 수 없습니다.")
@@ -2667,6 +3006,7 @@ if uploaded_file is not None:
         #     )
         
         # 메모장 기능 추가 (파트별로 구분, 주차별 저장)
+        st.markdown('<span id="section_plans" class="anchor"></span>', unsafe_allow_html=True)
         st.markdown("---")
         st.markdown(f"#### 📝 {month_label} 계획 (파트별)")
         
@@ -3089,6 +3429,7 @@ https://elsupervision.com/default/
                         st.markdown(memo_display_part2, unsafe_allow_html=True)
         
         # 주차별 경영진 회의록 추가 (숨김 처리)
+        # st.markdown('<span id="section_meeting" class="anchor"></span>', unsafe_allow_html=True)
         # st.markdown("---")
         # st.markdown(f"#### 📋 {month_label} 주차별 경영진 회의록")
         # 
