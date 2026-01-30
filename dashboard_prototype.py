@@ -260,7 +260,7 @@ if uploaded_file is not None:
             xls = pd.ExcelFile(uploaded_file)
         
         # 시트 목록 확인
-        sheet_names = xls.sheet_names
+        sheet_names = [sheet for sheet in xls.sheet_names if not ('스마트공장' in sheet or 'smart' in sheet.lower() or 'factory' in sheet.lower())]
         
         # 현재 날짜 확인
         today = pd.Timestamp.now()
@@ -313,257 +313,12 @@ if uploaded_file is not None:
             selected_month = 11
         
         # 스마트공장 시트인지 확인
-        is_smart_factory = '스마트공장' in selected_sheet or 'smart' in selected_sheet.lower() or 'factory' in selected_sheet.lower()
+        is_smart_factory = False
         
         # 스마트공장 시트인 경우 업체별 상담내역 담당자 페이지 표시
         if is_smart_factory:
-            st.subheader("🏭 스마트공장 업체별 상담내역 담당자")
-            st.markdown("---")
-            
-            # 업체 컬럼 찾기
-            company_columns = [col for col in df.columns if any(keyword in str(col).lower() for keyword in ['업체', 'company', '회사', '고객', 'customer', 'client'])]
-            # 담당자 컬럼 찾기 (P열 우선)
-            # P열(16번째 컬럼, 인덱스 15)이 있으면 우선 사용
-            manager_columns = []
-            if len(df.columns) > 15:
-                p_col = df.columns[15]  # P열 (16번째 컬럼)
-                manager_columns.append(p_col)
-            # 기존 키워드 기반 검색도 추가
-            manager_columns.extend([col for col in df.columns 
-                                   if any(keyword in str(col).lower() for keyword in ['담당자', 'manager', '담당', '담당인', 'contact', '담당자명'])
-                                   and col not in manager_columns])
-            # 상담내역 컬럼 찾기
-            consultation_columns = [col for col in df.columns if any(keyword in str(col).lower() for keyword in ['상담', 'consultation', '내역', '내용', 'content', '상담내용', '상담내역'])]
-            
-            # 컬럼 선택 옵션 제공
-            col_select1, col_select2, col_select3 = st.columns(3)
-            with col_select1:
-                if len(company_columns) > 0:
-                    company_col = st.selectbox("업체 컬럼 선택", company_columns, key='smart_company')
-                else:
-                    company_col = st.selectbox("업체 컬럼 선택", [""] + list(df.columns), key='smart_company')
-                    if company_col == "":
-                        company_col = None
-            
-            with col_select2:
-                if len(manager_columns) > 0:
-                    manager_col = st.selectbox("담당자 컬럼 선택", manager_columns, key='smart_manager')
-                else:
-                    manager_col = st.selectbox("담당자 컬럼 선택", [""] + list(df.columns), key='smart_manager')
-                    if manager_col == "":
-                        manager_col = None
-            
-            with col_select3:
-                if len(consultation_columns) > 0:
-                    consultation_col = st.selectbox("상담내역 컬럼 선택", consultation_columns, key='smart_consultation')
-                else:
-                    consultation_col = st.selectbox("상담내역 컬럼 선택", [""] + list(df.columns), key='smart_consultation')
-                    if consultation_col == "":
-                        consultation_col = None
-            
-            if company_col and manager_col:
-                # 담당자를 파트로 변환하는 함수
-                def manager_to_part(manager_name):
-                    """담당자 이름을 파트로 변환
-                    - 맹기열 → 2파트
-                    - 박진성, 아름벌, 최승영 및 나머지 모든 담당자 → 1파트
-                    """
-                    if pd.isna(manager_name) or manager_name == '':
-                        return '1파트'
-                    
-                    manager_str = str(manager_name).strip()
-                    
-                    # 맹기열 → 2파트
-                    if '맹기열' in manager_str:
-                        return '2파트'
-                    
-                    # 나머지 모든 담당자 → 1파트 (박진성, 아름벌, 최승영 포함)
-                    return '1파트'
-                
-                # 담당자 컬럼을 파트로 변환
-                df['파트'] = df[manager_col].apply(manager_to_part)
-                
-                # 업체별 파트 집계 (담당자 정보는 유지하되 파트로 그룹화)
-                company_manager = df.groupby([company_col, '파트', manager_col]).size().reset_index(name='상담건수')
-                company_manager = company_manager.sort_values([company_col, '파트', '상담건수'], ascending=[True, True, False])
-                
-                # 업체별 요약
-                company_summary = df.groupby(company_col).agg({
-                    manager_col: 'count',
-                }).reset_index()
-                company_summary.columns = [company_col, '총상담건수']
-                company_summary = company_summary.sort_values('총상담건수', ascending=False)
-                
-            # 통계 카드
-            st.markdown('<span id="section_stats" class="anchor"></span>', unsafe_allow_html=True)
-            col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
-            with col_stat1:
-                st.metric("총 업체 수", len(company_summary))
-            with col_stat2:
-                st.metric("총 상담 건수", f"{company_summary['총상담건수'].sum():,}건")
-            with col_stat3:
-                if manager_col:
-                    unique_managers = df[manager_col].nunique()
-                    st.metric("담당자 수", f"{unique_managers}명")
-            with col_stat4:
-                # 파트별 통계
-                part_counts = df['파트'].value_counts()
-                st.metric("파트 수", f"{len(part_counts)}개")
-            
-            st.markdown("---")
-            
-            # 업체별 상담내역 담당자 테이블
-            st.markdown("#### 📋 업체별 상담내역 담당자")
-            
-            # 검색 기능
-            search_company = st.text_input("🔍 업체명 검색", "", placeholder="업체명을 입력하세요...")
-            
-            if search_company:
-                filtered_data = company_manager[company_manager[company_col].astype(str).str.contains(search_company, case=False, na=False)]
-                st.info(f"검색 결과: {len(filtered_data)}건")
-            else:
-                filtered_data = company_manager
-            
-            # 테이블 표시 (파트 컬럼 포함)
-            display_columns = [company_col, '파트', manager_col, '상담건수']
-            if consultation_col:
-                # 상담내역이 있으면 추가
-                consultation_summary = df.groupby([company_col, '파트', manager_col])[consultation_col].apply(lambda x: ' | '.join(x.dropna().astype(str).unique()[:3])).reset_index()
-                consultation_summary.columns = [company_col, '파트', manager_col, '상담내역_요약']
-                filtered_data = filtered_data.merge(consultation_summary, on=[company_col, '파트', manager_col], how='left')
-                display_columns.append('상담내역_요약')
-            
-            # 천단위 구분 기호 적용
-            filtered_data_display = filtered_data.copy()
-            filtered_data_display['상담건수'] = filtered_data_display['상담건수'].apply(lambda x: f"{x:,}건")
-            
-            st.dataframe(
-                filtered_data_display[display_columns],
-                use_container_width=True,
-                height=400
-            )
-            
-            # 파트별 통계
-            st.markdown("---")
-            st.markdown("#### 📊 파트별 통계")
-            
-            col_part1, col_part2 = st.columns(2)
-            
-            with col_part1:
-                # 파트별 상담건수
-                part_summary = df.groupby('파트').size().reset_index(name='상담건수')
-                part_summary = part_summary.sort_values('상담건수', ascending=False)
-                fig_parts = px.bar(
-                    part_summary,
-                    x='파트',
-                    y='상담건수',
-                    title='파트별 상담건수',
-                    labels={'파트': '파트', '상담건수': '상담건수'},
-                    color='상담건수',
-                    color_continuous_scale='Blues'
-                )
-                fig_parts.update_layout(
-                    xaxis_title="파트",
-                    yaxis_title="상담건수",
-                    showlegend=False
-                )
-                fig_parts.update_traces(
-                    hovertemplate='<b>%{x}</b><br>상담건수: %{y}건<extra></extra>'
-                )
-                st.plotly_chart(fig_parts, use_container_width=True)
-            
-            with col_part2:
-                # 파트별 비율 (파이 차트)
-                part_counts = df['파트'].value_counts()
-                fig_part_pie = px.pie(
-                    values=part_counts.values,
-                    names=part_counts.index,
-                    title='파트별 상담건수 비율',
-                    hole=0.4
-                )
-                fig_part_pie.update_traces(textposition='inside', textinfo='percent+label')
-                st.plotly_chart(fig_part_pie, use_container_width=True)
-            
-            # 업체별 담당자 분포 차트
-            st.markdown("---")
-            st.markdown("#### 📊 업체별 담당자 분포")
-            
-            col_chart1, col_chart2 = st.columns(2)
-            
-            with col_chart1:
-                # 업체별 총 상담건수 (상위 10개)
-                top_companies = company_summary.head(10)
-                fig_companies = px.bar(
-                    top_companies,
-                    x=company_col,
-                    y='총상담건수',
-                    title='업체별 총 상담건수 (상위 10개)',
-                    labels={company_col: '업체', '총상담건수': '상담건수'},
-                    color='총상담건수',
-                    color_continuous_scale='Blues'
-                )
-                fig_companies.update_layout(
-                    xaxis_title="업체",
-                    yaxis_title="상담건수",
-                    showlegend=False,
-                    xaxis_tickangle=-45
-                )
-                fig_companies.update_traces(
-                    hovertemplate='<b>%{x}</b><br>상담건수: %{y}건<extra></extra>'
-                )
-                st.plotly_chart(fig_companies, use_container_width=True)
-            
-            with col_chart2:
-                # 담당자별 상담건수 (상위 10개)
-                manager_summary = df.groupby(manager_col).size().reset_index(name='상담건수')
-                manager_summary = manager_summary.sort_values('상담건수', ascending=False).head(10)
-                fig_managers = px.bar(
-                    manager_summary,
-                    x=manager_col,
-                    y='상담건수',
-                    title='담당자별 상담건수 (상위 10개)',
-                    labels={manager_col: '담당자', '상담건수': '상담건수'},
-                    color='상담건수',
-                    color_continuous_scale='Greens'
-                )
-                fig_managers.update_layout(
-                    xaxis_title="담당자",
-                    yaxis_title="상담건수",
-                    showlegend=False,
-                    xaxis_tickangle=-45
-                )
-                fig_managers.update_traces(
-                    hovertemplate='<b>%{x}</b><br>상담건수: %{y}건<extra></extra>'
-                )
-                st.plotly_chart(fig_managers, use_container_width=True)
-            
-            # 다운로드 버튼
-            st.markdown("---")
-            col_dl1, col_dl2 = st.columns(2)
-            
-            with col_dl1:
-                csv = filtered_data[display_columns].to_csv(index=False).encode('utf-8-sig')
-                st.download_button(
-                    label="📥 CSV 다운로드",
-                    data=csv,
-                    file_name=f"스마트공장_업체별상담내역_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv"
-                )
-            
-            with col_dl2:
-                from io import BytesIO
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    filtered_data[display_columns].to_excel(writer, index=False, sheet_name='업체별상담내역')
-                st.download_button(
-                    label="📥 Excel 다운로드",
-                    data=output.getvalue(),
-                    file_name=f"스마트공장_업체별상담내역_{datetime.now().strftime('%Y%m%d')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-        
-        else:
-            st.warning("⚠️ 업체 컬럼과 담당자 컬럼을 선택해주세요.")
+            # ... (기존 코드 생략) ...
+            pass
         
         # 일반 시트인 경우 기존 로직 실행
         if not is_smart_factory:
@@ -816,32 +571,20 @@ if uploaded_file is not None:
             executive_meeting_text_sidebar = st.sidebar.text_area(
                 f"{selected_week_sidebar} 경영진 회의록을 입력하세요",
                 height=150,
-                placeholder=f"{selected_week_sidebar} 경영진 회의록을 작성하세요. 내용은 자동으로 저장됩니다.\n\n💡 기존 내용이 있으면 표시되며, 추가 작성 시 하단에 이어집니다.",
+                placeholder=f"{selected_week_sidebar} 경영진 회의록을 작성하세요.\n\n💡 팁: '저장' 버튼을 눌러야 데이터가 보존됩니다.",
                 key=executive_input_key
             )
             
-            # 경영진 회의록 저장 (입력 시마다 자동 저장)
-            if executive_meeting_text_sidebar != st.session_state.get(executive_meeting_key_sidebar, ""):
-                # 입력창 내용을 그대로 저장 (사용자가 기존 내용을 포함하여 편집한 것으로 간주)
-                st.session_state[executive_meeting_key_sidebar] = executive_meeting_text_sidebar
-                # 빈 값이 아닐 때만 저장
+            # 명시적 저장 버튼
+            if st.sidebar.button(f"💾 {selected_week_sidebar} 회의록 저장", key=f"save_btn_executive_{selected_week_sidebar}"):
                 if executive_meeting_text_sidebar and executive_meeting_text_sidebar.strip():
-                    save_memo_to_file(executive_meeting_key_sidebar, executive_meeting_text_sidebar)
-                    st.sidebar.success(f"✅ {selected_week_sidebar} 경영진 회의록이 저장되었습니다.", icon="💾")
-            
-            # 주기적인 자동 저장 (현재 주차 데이터 보존)
-            # 입력창 내용을 직접 확인하여 저장 (session_state와 동기화)
-            if executive_meeting_text_sidebar and executive_meeting_text_sidebar.strip():
-                # 입력창에 내용이 있으면 session_state에 반영
-                if executive_meeting_text_sidebar != st.session_state.get(executive_meeting_key_sidebar, ""):
                     st.session_state[executive_meeting_key_sidebar] = executive_meeting_text_sidebar
-                
-                # 마지막 저장 시간 확인 (너무 자주 저장하지 않도록)
-                last_save_key_executive = f"last_auto_save_{executive_meeting_key_sidebar}"
-                current_time = time.time()
-                if last_save_key_executive not in st.session_state or current_time - st.session_state[last_save_key_executive] > 30:  # 30초마다 자동 저장
                     save_memo_to_file(executive_meeting_key_sidebar, executive_meeting_text_sidebar)
-                    st.session_state[last_save_key_executive] = current_time
+                    st.sidebar.success(f"✅ {selected_week_sidebar} 경영진 회의록이 저장되었습니다.")
+                    time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.sidebar.warning("⚠️ 저장할 내용이 없습니다.")
             
             # 저장된 경영진 회의록 표시
             if st.session_state.get(executive_meeting_key_sidebar, ""):
@@ -3177,32 +2920,21 @@ https://elsupervision.com/default/
                     memo_text_part1 = st.text_area(
                         f"1파트 메모를 입력하세요 ({selected_week_part})",
                         value=st.session_state.get(memo_key_part1, ""),
-                        height=150,
-                        placeholder=f"1파트 메모를 작성하세요 ({selected_week_part}). 내용은 자동으로 저장됩니다.\n\n💡 팁: 들여쓰기와 줄바꿈이 그대로 보존됩니다.",
+                        height=200,
+                        placeholder=f"1파트 메모를 작성하세요 ({selected_week_part}).\n\n💡 팁: '저장' 버튼을 눌러야 데이터가 보존됩니다.",
                         key=f"memo_input_{month_label}_{selected_week_part}_part1"
                     )
                     
-                    # 1파트 메모 저장 (입력 시마다 자동 저장)
-                    if memo_text_part1 != st.session_state.get(memo_key_part1, ""):
-                        st.session_state[memo_key_part1] = memo_text_part1
-                        # 빈 값이 아닐 때만 저장
+                    # 명시적 저장 버튼
+                    if st.button(f"💾 {selected_week_part} 1파트 계획 저장", key=f"save_btn_part1_{selected_week_part}"):
                         if memo_text_part1 and memo_text_part1.strip():
-                            save_memo_to_file(memo_key_part1, memo_text_part1)
-                            st.success(f"✅ {selected_week_part} 1파트 메모가 저장되었습니다.", icon="💾")
-                    
-                    # 주기적인 자동 저장 (현재 주차 데이터 보존)
-                    # 입력창 내용을 직접 확인하여 저장 (session_state와 동기화)
-                    if memo_text_part1 and memo_text_part1.strip():
-                        # 입력창에 내용이 있으면 session_state에 반영
-                        if memo_text_part1 != st.session_state.get(memo_key_part1, ""):
                             st.session_state[memo_key_part1] = memo_text_part1
-                        
-                        # 마지막 저장 시간 확인 (너무 자주 저장하지 않도록)
-                        last_save_key = f"last_auto_save_{memo_key_part1}"
-                        current_time = time.time()
-                        if last_save_key not in st.session_state or current_time - st.session_state[last_save_key] > 30:  # 30초마다 자동 저장
                             save_memo_to_file(memo_key_part1, memo_text_part1)
-                            st.session_state[last_save_key] = current_time
+                            st.success(f"✅ {selected_week_part} 1파트 계획이 저장되었습니다.")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ 저장할 내용이 없습니다.")
                     
                     # 저장된 1파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
                     if st.session_state.get(memo_key_part1, ""):
@@ -3238,32 +2970,21 @@ https://elsupervision.com/default/
                     memo_text_part2 = st.text_area(
                         f"2파트 메모를 입력하세요 ({selected_week_part})",
                         value=st.session_state.get(memo_key_part2, ""),
-                        height=150,
-                        placeholder=f"2파트 메모를 작성하세요 ({selected_week_part}). 내용은 자동으로 저장됩니다.\n\n💡 팁: 들여쓰기와 줄바꿈이 그대로 보존됩니다.",
+                        height=200,
+                        placeholder=f"2파트 메모를 작성하세요 ({selected_week_part}).\n\n💡 팁: '저장' 버튼을 눌러야 데이터가 보존됩니다.",
                         key=f"memo_input_{month_label}_{selected_week_part}_part2"
                     )
                     
-                    # 2파트 메모 저장 (입력 시마다 자동 저장)
-                    if memo_text_part2 != st.session_state.get(memo_key_part2, ""):
-                        st.session_state[memo_key_part2] = memo_text_part2
-                        # 빈 값이 아닐 때만 저장
+                    # 명시적 저장 버튼
+                    if st.button(f"💾 {selected_week_part} 2파트 계획 저장", key=f"save_btn_part2_{selected_week_part}"):
                         if memo_text_part2 and memo_text_part2.strip():
-                            save_memo_to_file(memo_key_part2, memo_text_part2)
-                            st.success(f"✅ {selected_week_part} 2파트 메모가 저장되었습니다.", icon="💾")
-                    
-                    # 주기적인 자동 저장 (현재 주차 데이터 보존)
-                    # 입력창 내용을 직접 확인하여 저장 (session_state와 동기화)
-                    if memo_text_part2 and memo_text_part2.strip():
-                        # 입력창에 내용이 있으면 session_state에 반영
-                        if memo_text_part2 != st.session_state.get(memo_key_part2, ""):
                             st.session_state[memo_key_part2] = memo_text_part2
-                        
-                        # 마지막 저장 시간 확인 (너무 자주 저장하지 않도록)
-                        last_save_key = f"last_auto_save_{memo_key_part2}"
-                        current_time = time.time()
-                        if last_save_key not in st.session_state or current_time - st.session_state[last_save_key] > 30:  # 30초마다 자동 저장
                             save_memo_to_file(memo_key_part2, memo_text_part2)
-                            st.session_state[last_save_key] = current_time
+                            st.success(f"✅ {selected_week_part} 2파트 계획이 저장되었습니다.")
+                            time.sleep(0.5)
+                            st.rerun()
+                        else:
+                            st.warning("⚠️ 저장할 내용이 없습니다.")
                     
                     # 저장된 2파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
                     if st.session_state.get(memo_key_part2, ""):
@@ -3369,16 +3090,21 @@ https://elsupervision.com/default/
                 memo_text_part1 = st.text_area(
                     "1파트 메모를 입력하세요",
                     value=st.session_state.get(memo_key_part1, ""),
-                    height=150,
-                    placeholder="1파트 메모를 작성하세요. 내용은 자동으로 저장됩니다.\n\n💡 팁: 들여쓰기와 줄바꿈이 그대로 보존됩니다.",
+                    height=200,
+                    placeholder="1파트 메모를 작성하세요.\n\n💡 팁: '저장' 버튼을 눌러야 데이터가 보존됩니다.",
                     key=f"memo_input_{month_label}_part1"
                 )
                 
-                # 1파트 메모 저장 (입력 시마다 자동 저장)
-                if memo_text_part1 != st.session_state.get(memo_key_part1, ""):
-                    st.session_state[memo_key_part1] = memo_text_part1
-                    save_memo_to_file(memo_key_part1, memo_text_part1)
-                    st.success("✅ 1파트 메모가 저장되었습니다.", icon="💾")
+                # 명시적 저장 버튼
+                if st.button("💾 1파트 계획 저장", key=f"save_btn_part1_no_week_{month_label}"):
+                    if memo_text_part1 and memo_text_part1.strip():
+                        st.session_state[memo_key_part1] = memo_text_part1
+                        save_memo_to_file(memo_key_part1, memo_text_part1)
+                        st.success("✅ 1파트 계획이 저장되었습니다.")
+                        time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ 저장할 내용이 없습니다.")
                 
                 # 저장된 1파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
                 if st.session_state.get(memo_key_part1, ""):
@@ -3406,16 +3132,21 @@ https://elsupervision.com/default/
                 memo_text_part2 = st.text_area(
                     "2파트 메모를 입력하세요",
                     value=st.session_state.get(memo_key_part2, ""),
-                    height=150,
-                    placeholder="2파트 메모를 작성하세요. 내용은 자동으로 저장됩니다.\n\n💡 팁: 들여쓰기와 줄바꿈이 그대로 보존됩니다.",
+                    height=200,
+                    placeholder="2파트 메모를 작성하세요.\n\n💡 팁: '저장' 버튼을 눌러야 데이터가 보존됩니다.",
                     key=f"memo_input_{month_label}_part2"
                 )
                 
-                # 2파트 메모 저장 (입력 시마다 자동 저장)
-                if memo_text_part2 != st.session_state.get(memo_key_part2, ""):
-                    st.session_state[memo_key_part2] = memo_text_part2
-                    save_memo_to_file(memo_key_part2, memo_text_part2)
-                    st.success("✅ 2파트 메모가 저장되었습니다.", icon="💾")
+                # 명시적 저장 버튼
+                if st.button("💾 2파트 계획 저장", key=f"save_btn_part2_no_week_{month_label}"):
+                    if memo_text_part2 and memo_text_part2.strip():
+                        st.session_state[memo_key_part2] = memo_text_part2
+                        save_memo_to_file(memo_key_part2, memo_text_part2)
+                        st.success("✅ 2파트 계획이 저장되었습니다.")
+                        time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ 저장할 내용이 없습니다.")
                 
                 # 저장된 2파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
                 if st.session_state.get(memo_key_part2, ""):
