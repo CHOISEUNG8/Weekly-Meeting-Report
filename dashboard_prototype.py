@@ -1103,6 +1103,20 @@ if uploaded_file is not None:
                 num_rows = len(large_qty_display)
                 height = max(300, num_rows * 35 + 100)  # 각 행당 35px + 헤더 100px
                 
+                # 순위 컬럼 좌측 정렬을 위한 CSS 스타일
+                st.markdown("""
+                <style>
+                .stDataFrame table thead th:first-child,
+                .stDataFrame table tbody td:first-child {
+                    text-align: left !important;
+                }
+                div[data-testid="stDataFrame"] table thead th:first-child,
+                div[data-testid="stDataFrame"] table tbody td:first-child {
+                    text-align: left !important;
+                }
+                </style>
+                """, unsafe_allow_html=True)
+                
                 st.dataframe(
                     large_qty_display[display_cols], 
                     use_container_width=True, 
