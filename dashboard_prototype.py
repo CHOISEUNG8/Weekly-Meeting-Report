@@ -284,22 +284,15 @@ if uploaded_file is not None:
                 december_sheet = sheet
         
         # 시트 선택 기본값 설정
-        # 오늘이 1월이면 1월 시트를 우선, 아니면 12월 → 11월 순서
-        if current_month == 1 and january_sheet:
-            default_sheet = january_sheet
-        elif december_sheet:
-            default_sheet = december_sheet
+        # 첫 번째 시트를 기본값으로 설정
+        if len(sheet_names) > 0:
+            selected_sheet = st.selectbox("시트 선택", sheet_names, index=0)
         else:
-            default_sheet = november_sheet
+            st.error("⚠️ 사용 가능한 시트가 없습니다.")
+            selected_sheet = None
         
-        if default_sheet:
-            selected_sheet = st.selectbox("시트 선택", sheet_names, index=sheet_names.index(default_sheet))
-        else:
-            selected_sheet = st.selectbox("시트 선택", sheet_names)
-            if current_month == 1:
-                st.info("💡 1월 시트를 찾지 못했습니다. 시트 이름에 '2026년 1월', '1월' 또는 'january', 'jan'이 포함되어 있는지 확인하세요.")
-            else:
-                st.info("💡 12월 또는 11월 시트를 찾지 못했습니다. 시트 이름에 '12월', '11월' 또는 '12', '11'이 포함되어 있는지 확인하세요.")
+        if selected_sheet is None:
+            st.stop()
         
         df = pd.read_excel(xls, sheet_name=selected_sheet)
         
