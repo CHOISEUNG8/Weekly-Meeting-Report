@@ -1101,8 +1101,25 @@ if uploaded_file is not None:
                 # 표시용 데이터 포맷팅
                 large_qty_display = large_qty_summary.copy()
                 large_qty_display['총판매수량'] = large_qty_display['총판매수량'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
+                
+                # 순위 추가
+                large_qty_display.insert(0, '순위', range(1, len(large_qty_display) + 1))
+                display_cols = ['순위'] + display_cols
 
-                st.dataframe(large_qty_display[display_cols], use_container_width=True, hide_index=True)
+                # 데이터프레임 높이 설정 (행 수에 따라 동적 조정, 최소 10행 표시)
+                num_rows = len(large_qty_display)
+                height = max(300, num_rows * 35 + 100)  # 각 행당 35px + 헤더 100px
+                
+                st.dataframe(
+                    large_qty_display[display_cols], 
+                    use_container_width=True, 
+                    hide_index=True,
+                    height=height
+                )
+                
+                # 실제 표시된 상품 수 정보
+                if num_rows < 10:
+                    st.caption(f"※ 총 {num_rows}개의 상품이 표시되었습니다.")
             else:
                 st.info(f"판매수량 {large_qty_threshold}개 이상인 상품이 없습니다.")
 
