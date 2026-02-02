@@ -1081,7 +1081,7 @@ if uploaded_file is not None:
             # 2. 대량으로 판매된 상품 (개별 판매수량이 큰 상품들)
             st.markdown("#### 📦 대량 판매 상품 TOP 10")
             # 개별 거래에서 판매수량이 큰 것들만 필터링 (예: 100개 이상)
-            large_qty_threshold = 50  # 임계값 설정
+            large_qty_threshold = 10  # 임계값 설정
             large_qty_products = df[df[sales_qty_col] >= large_qty_threshold].copy()
 
             if len(large_qty_products) > 0:
