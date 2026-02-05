@@ -993,6 +993,251 @@ if uploaded_file is not None:
                 st.markdown("**이익률(GP%):** 계산 불가")
         
         st.markdown("---")
+        
+        # 전년도 매출이익금 매출 추이 그래프 (주차별)
+        st.subheader("📈 전년도 매출이익금 매출 추이 (연간 52주)")
+        
+        try:
+            # 연도별 주차 계산 함수 (1년을 52주로 나누기)
+            def get_year_week(date, year):
+                """해당 연도의 주차 계산 (1월 1일부터 시작, 1주차~52주차)
+                연초부터 시작하는 주차 계산
+                """
+                if pd.isna(date):
+                    return None
+                
+                # 해당 연도의 1월 1일
+                year_start = pd.Timestamp(year, 1, 1)
+                
+                # 1월 1일이 속한 주의 월요일 찾기 (주차는 월요일부터 시작)
+                year_start_weekday = year_start.weekday()  # 0=월요일, 6=일요일
+                first_week_monday = year_start - pd.Timedelta(days=year_start_weekday)
+                
+                # 해당 날짜가 속한 주의 월요일 찾기
+                date_weekday = date.weekday()
+                date_monday = date - pd.Timedelta(days=date_weekday)
+                
+                # 주차 계산 (1주차부터 시작)
+                days_diff = (date_monday - first_week_monday).days
+                week_number = (days_diff // 7) + 1
+                
+                # 연초 처리: 1월 1일 이전이면 전년도 마지막 주차로 처리하지 않음 (해당 연도 1주차로 처리)
+                if week_number < 1:
+                    week_number = 1
+                
+                # 52주를 넘지 않도록 제한
+                if week_number > 52:
+                    week_number = 52
+                
+                return week_number
+            
+            # 2025년과 2026년 주차별 데이터 수집
+            weekly_data_2025 = {}
+            weekly_data_2026 = {}
+            
+            # 2025 통합 raw 시트 찾기
+            sheet_2025 = None
+            for sheet_name in sheet_names:
+                if '2025' in sheet_name and '통합' in sheet_name and 'raw' in sheet_name.lower():
+                    sheet_2025 = sheet_name
+                    break
+            
+            # 2026년 1월 raw 시트 찾기
+            sheet_2026 = None
+            for sheet_name in sheet_names:
+                if '2026' in sheet_name and '1월' in sheet_name and 'raw' in sheet_name.lower():
+                    sheet_2026 = sheet_name
+                    break
+            
+            # 2025년 데이터 처리 (2025 통합 raw 시트)
+            if sheet_2025:
+                try:
+                    df_2025 = pd.read_excel(xls, sheet_name=sheet_2025)
+                    
+                    # E열 찾기 (인덱스 4, 날짜)
+                    e_column_index = 4
+                    date_col = None
+                    if len(df_2025.columns) > e_column_index:
+                        date_col = df_2025.columns[e_column_index]
+                    
+                    # M열 찾기 (인덱스 12, 매출총이익)
+                    m_column_index = 12
+                    profit_col = None
+                    if len(df_2025.columns) > m_column_index:
+                        profit_col = df_2025.columns[m_column_index]
+                    
+                    if date_col and profit_col:
+                        # 날짜 데이터 타입 변환
+                        df_2025[date_col] = pd.to_datetime(df_2025[date_col], errors='coerce')
+                        
+                        # 매출이익금 데이터 타입 변환
+                        if df_2025[profit_col].dtype == 'object':
+                            df_2025[profit_col] = pd.to_numeric(df_2025[profit_col], errors='coerce')
+                        
+                        # 주차 계산 및 집계
+                        df_2025['주차'] = df_2025[date_col].apply(lambda x: get_year_week(x, 2025) if pd.notna(x) else None)
+                        
+                        # 주차별 매출이익금 집계
+                        df_2025_filtered = df_2025[df_2025['주차'].notna()]
+                        if len(df_2025_filtered) > 0:
+                            weekly_profit = df_2025_filtered.groupby('주차')[profit_col].sum().reset_index()
+                            weekly_profit.columns = ['주차', '매출이익금']
+                            
+                            for _, row in weekly_profit.iterrows():
+                                week = int(row['주차'])
+                                if week not in weekly_data_2025:
+                                    weekly_data_2025[week] = 0
+                                weekly_data_2025[week] += row['매출이익금']
+                
+                except Exception as e:
+                    st.warning(f"⚠️ 2025 통합 raw 시트 처리 중 오류: {str(e)}")
+            
+            # 2026년 데이터 처리 (2026년 1월 raw 시트)
+            if sheet_2026:
+                try:
+                    df_2026 = pd.read_excel(xls, sheet_name=sheet_2026)
+                    
+                    # E열 찾기 (인덱스 4, 날짜)
+                    e_column_index = 4
+                    date_col = None
+                    if len(df_2026.columns) > e_column_index:
+                        date_col = df_2026.columns[e_column_index]
+                    
+                    # N열 찾기 (인덱스 13, 매출총이익)
+                    n_column_index = 13
+                    profit_col = None
+                    if len(df_2026.columns) > n_column_index:
+                        profit_col = df_2026.columns[n_column_index]
+                    
+                    if date_col and profit_col:
+                        # 날짜 데이터 타입 변환
+                        df_2026[date_col] = pd.to_datetime(df_2026[date_col], errors='coerce')
+                        
+                        # 매출이익금 데이터 타입 변환
+                        if df_2026[profit_col].dtype == 'object':
+                            df_2026[profit_col] = pd.to_numeric(df_2026[profit_col], errors='coerce')
+                        
+                        # 주차 계산 및 집계
+                        df_2026['주차'] = df_2026[date_col].apply(lambda x: get_year_week(x, 2026) if pd.notna(x) else None)
+                        
+                        # 주차별 매출이익금 집계
+                        df_2026_filtered = df_2026[df_2026['주차'].notna()]
+                        if len(df_2026_filtered) > 0:
+                            weekly_profit = df_2026_filtered.groupby('주차')[profit_col].sum().reset_index()
+                            weekly_profit.columns = ['주차', '매출이익금']
+                            
+                            for _, row in weekly_profit.iterrows():
+                                week = int(row['주차'])
+                                if week not in weekly_data_2026:
+                                    weekly_data_2026[week] = 0
+                                weekly_data_2026[week] += row['매출이익금']
+                
+                except Exception as e:
+                    st.warning(f"⚠️ 2026년 1월 raw 시트 처리 중 오류: {str(e)}")
+            
+            # 시트를 찾지 못한 경우 안내
+            if not sheet_2025:
+                st.info("💡 '2025 통합 raw' 시트를 찾을 수 없습니다.")
+            if not sheet_2026:
+                st.info("💡 '2026년 1월 raw' 시트를 찾을 수 없습니다.")
+            
+            # 그래프 데이터 준비
+            if len(weekly_data_2025) > 0 or len(weekly_data_2026) > 0:
+                # 1주차부터 52주차까지 모든 주차에 대해 데이터 준비
+                weeks = list(range(1, 53))
+                data_2025 = [weekly_data_2025.get(week, 0) for week in weeks]
+                data_2026 = [weekly_data_2026.get(week, 0) for week in weeks]
+                
+                # 디버깅: 실제 수집된 주차 범위 확인
+                if len(weekly_data_2025) > 0:
+                    max_week_2025 = max(weekly_data_2025.keys())
+                    st.caption(f"📊 2025년 데이터: {min(weekly_data_2025.keys())}주차 ~ {max_week_2025}주차 (총 {len(weekly_data_2025)}주차)")
+                if len(weekly_data_2026) > 0:
+                    max_week_2026 = max(weekly_data_2026.keys())
+                    st.caption(f"📊 2026년 데이터: {min(weekly_data_2026.keys())}주차 ~ {max_week_2026}주차 (총 {len(weekly_data_2026)}주차)")
+                
+                # 그래프 생성
+                fig = go.Figure()
+                
+                # 2025년 데이터
+                if len(weekly_data_2025) > 0:
+                    fig.add_trace(go.Bar(
+                        x=weeks,
+                        y=data_2025,
+                        name='2025',
+                        marker_color='#1f77b4',  # 파란색
+                        text=[f'{x:,.0f}' if x > 0 else '' for x in data_2025],
+                        textposition='outside'
+                    ))
+                
+                # 2026년 데이터
+                if len(weekly_data_2026) > 0:
+                    fig.add_trace(go.Bar(
+                        x=weeks,
+                        y=data_2026,
+                        name='2026',
+                        marker_color='#808080',  # 회색
+                        text=[f'{x:,.0f}' if x > 0 else '' for x in data_2026],
+                        textposition='outside'
+                    ))
+                
+                # 그래프 레이아웃 설정
+                # 모든 주차(1~52)에 대한 틱 값 생성
+                tick_vals = list(range(1, 53, 4))  # 1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49
+                if 52 not in tick_vals:
+                    tick_vals.append(52)  # 52주차도 포함
+                
+                fig.update_layout(
+                    title='전년도 매출이익금 매출 추이 (연간 52주)',
+                    xaxis_title='주차',
+                    yaxis_title='매출이익금 (원)',
+                    barmode='group',
+                    xaxis=dict(
+                        tickmode='array',
+                        tickvals=tick_vals,
+                        ticktext=[f'{w}주' for w in tick_vals],
+                        range=[0.5, 52.5],  # 1주차부터 52주차까지 명확히 표시
+                        showgrid=True
+                    ),
+                    yaxis=dict(
+                        tickformat=',.0f'
+                    ),
+                    height=600,
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=1.02,
+                        xanchor="right",
+                        x=1
+                    )
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # 주차별 데이터 요약 표시
+                if len(weekly_data_2025) > 0 or len(weekly_data_2026) > 0:
+                    col_summary1, col_summary2 = st.columns(2)
+                    
+                    with col_summary1:
+                        if len(weekly_data_2025) > 0:
+                            total_2025 = sum(weekly_data_2025.values())
+                            avg_2025 = total_2025 / len(weekly_data_2025) if len(weekly_data_2025) > 0 else 0
+                            st.metric("2025년 총 매출이익금", f"{total_2025:,.0f}원")
+                            st.metric("2025년 주평균 매출이익금", f"{avg_2025:,.0f}원")
+                    
+                    with col_summary2:
+                        if len(weekly_data_2026) > 0:
+                            total_2026 = sum(weekly_data_2026.values())
+                            avg_2026 = total_2026 / len(weekly_data_2026) if len(weekly_data_2026) > 0 else 0
+                            st.metric("2026년 총 매출이익금", f"{total_2026:,.0f}원")
+                            st.metric("2026년 주평균 매출이익금", f"{avg_2026:,.0f}원")
+            else:
+                st.info("💡 2025년 또는 2026년 주차별 데이터를 찾을 수 없습니다.")
+        
+        except Exception as e:
+            st.warning(f"⚠️ 전년도 매출이익금 추이 그래프 생성 중 오류 발생: {str(e)}")
+        
+        st.markdown("---")
 
         # 엑셀 로우 데이터 기반 상품 분석
         st.markdown('<span id="section_sales" class="anchor"></span>', unsafe_allow_html=True)
