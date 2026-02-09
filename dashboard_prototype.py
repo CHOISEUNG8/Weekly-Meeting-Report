@@ -300,6 +300,8 @@ if uploaded_file is not None:
         selected_month = None
         if '1월' in selected_sheet and '11' not in selected_sheet and '12' not in selected_sheet:
             selected_month = 1
+        elif '2월' in selected_sheet or ('2' in selected_sheet and '월' in selected_sheet and '12' not in selected_sheet):
+            selected_month = 2
         elif '12월' in selected_sheet or ('12' in selected_sheet and '월' in selected_sheet):
             selected_month = 12
         elif '11월' in selected_sheet or ('11' in selected_sheet and '월' in selected_sheet):
@@ -1042,12 +1044,15 @@ if uploaded_file is not None:
                     sheet_2025 = sheet_name
                     break
             
-            # 2026년 1월 raw 시트 찾기
-            sheet_2026 = None
+            # 2026년 1월 raw, 2026년 2월 raw 시트 찾기
+            sheet_2026_jan = None
+            sheet_2026_feb = None
             for sheet_name in sheet_names:
-                if '2026' in sheet_name and '1월' in sheet_name and 'raw' in sheet_name.lower():
-                    sheet_2026 = sheet_name
-                    break
+                if '2026' in sheet_name and 'raw' in sheet_name.lower():
+                    if '1월' in sheet_name:
+                        sheet_2026_jan = sheet_name
+                    elif '2월' in sheet_name:
+                        sheet_2026_feb = sheet_name
             
             # 2025년 데이터 처리 (2025 통합 raw 시트)
             if sheet_2025:
@@ -1092,54 +1097,43 @@ if uploaded_file is not None:
                 except Exception as e:
                     st.warning(f"⚠️ 2025 통합 raw 시트 처리 중 오류: {str(e)}")
             
-            # 2026년 데이터 처리 (2026년 1월 raw 시트)
-            if sheet_2026:
+            # 2026년 데이터 처리 (2026년 1월 raw, 2026년 2월 raw 시트 - E열 날짜, N열 매출총이익)
+            def load_2026_raw(sheet_name):
+                if not sheet_name:
+                    return
                 try:
-                    df_2026 = pd.read_excel(xls, sheet_name=sheet_2026)
-                    
-                    # E열 찾기 (인덱스 4, 날짜)
+                    df_2026 = pd.read_excel(xls, sheet_name=sheet_name)
                     e_column_index = 4
-                    date_col = None
-                    if len(df_2026.columns) > e_column_index:
-                        date_col = df_2026.columns[e_column_index]
-                    
-                    # N열 찾기 (인덱스 13, 매출총이익)
                     n_column_index = 13
-                    profit_col = None
-                    if len(df_2026.columns) > n_column_index:
-                        profit_col = df_2026.columns[n_column_index]
-                    
-                    if date_col and profit_col:
-                        # 날짜 데이터 타입 변환
-                        df_2026[date_col] = pd.to_datetime(df_2026[date_col], errors='coerce')
-                        
-                        # 매출이익금 데이터 타입 변환
-                        if df_2026[profit_col].dtype == 'object':
-                            df_2026[profit_col] = pd.to_numeric(df_2026[profit_col], errors='coerce')
-                        
-                        # 주차 계산 및 집계
-                        df_2026['주차'] = df_2026[date_col].apply(lambda x: get_year_week(x, 2026) if pd.notna(x) else None)
-                        
-                        # 주차별 매출이익금 집계
-                        df_2026_filtered = df_2026[df_2026['주차'].notna()]
-                        if len(df_2026_filtered) > 0:
-                            weekly_profit = df_2026_filtered.groupby('주차')[profit_col].sum().reset_index()
-                            weekly_profit.columns = ['주차', '매출이익금']
-                            
-                            for _, row in weekly_profit.iterrows():
-                                week = int(row['주차'])
-                                if week not in weekly_data_2026:
-                                    weekly_data_2026[week] = 0
-                                weekly_data_2026[week] += row['매출이익금']
-                
+                    date_col = df_2026.columns[e_column_index] if len(df_2026.columns) > e_column_index else None
+                    profit_col = df_2026.columns[n_column_index] if len(df_2026.columns) > n_column_index else None
+                    if not date_col or not profit_col:
+                        return
+                    df_2026[date_col] = pd.to_datetime(df_2026[date_col], errors='coerce')
+                    if df_2026[profit_col].dtype == 'object':
+                        df_2026[profit_col] = pd.to_numeric(df_2026[profit_col], errors='coerce')
+                    df_2026['주차'] = df_2026[date_col].apply(lambda x: get_year_week(x, 2026) if pd.notna(x) else None)
+                    df_2026_filtered = df_2026[df_2026['주차'].notna()]
+                    if len(df_2026_filtered) == 0:
+                        return
+                    weekly_profit = df_2026_filtered.groupby('주차')[profit_col].sum().reset_index()
+                    weekly_profit.columns = ['주차', '매출이익금']
+                    for _, row in weekly_profit.iterrows():
+                        week = int(row['주차'])
+                        if week not in weekly_data_2026:
+                            weekly_data_2026[week] = 0
+                        weekly_data_2026[week] += row['매출이익금']
                 except Exception as e:
-                    st.warning(f"⚠️ 2026년 1월 raw 시트 처리 중 오류: {str(e)}")
+                    st.warning(f"⚠️ {sheet_name} 시트 처리 중 오류: {str(e)}")
+            
+            load_2026_raw(sheet_2026_jan)
+            load_2026_raw(sheet_2026_feb)
             
             # 시트를 찾지 못한 경우 안내
             if not sheet_2025:
                 st.info("💡 '2025 통합 raw' 시트를 찾을 수 없습니다.")
-            if not sheet_2026:
-                st.info("💡 '2026년 1월 raw' 시트를 찾을 수 없습니다.")
+            if not sheet_2026_jan and not sheet_2026_feb:
+                st.info("💡 '2026년 1월 raw' 또는 '2026년 2월 raw' 시트를 찾을 수 없습니다.")
             
             # 그래프 데이터 준비
             if len(weekly_data_2025) > 0 or len(weekly_data_2026) > 0:
@@ -1418,7 +1412,7 @@ if uploaded_file is not None:
                 month_label = "월"
         else:
             month_label = "월"
-        st.subheader("📊 1월 데이터 분석")
+        st.subheader(f"📊 {month_label} 데이터 분석")
         
         # 주차 번호를 한국어로 변환하는 함수
         def week_to_korean(week_num, min_week=None, month=None, max_week=None):
@@ -2573,10 +2567,11 @@ if uploaded_file is not None:
         
         # 2025년 판매분석 시트가 없거나 로드 실패한 경우 기존 방식 사용
         if df_analysis_base is None or len(df_analysis_base) == 0:
-            # 11월, 12월, 1월 시트 찾기 및 합산
+            # 11월, 12월, 1월, 2월 시트 찾기 및 합산
             november_sheet = None
             december_sheet = None
             january_sheet = None
+            february_sheet = None
             for sheet in sheet_names:
                 sheet_lower = sheet.lower()
                 # 11월 시트 찾기 (2025년 11월 raw 시트는 제외)
@@ -2586,12 +2581,14 @@ if uploaded_file is not None:
                     december_sheet = sheet
                 if '1월' in sheet or ('1' in sheet and '월' in sheet and '11' not in sheet and '12' not in sheet) or 'january' in sheet_lower or 'jan' in sheet_lower:
                     january_sheet = sheet
+                if '2월' in sheet or ('2' in sheet and '월' in sheet and '12' not in sheet) or 'february' in sheet_lower or 'feb' in sheet_lower:
+                    february_sheet = sheet
             
-            # 11월, 12월, 1월 시트를 모두 로드하여 합산
+            # 11월, 12월, 1월, 2월 시트를 모두 로드하여 합산
             df_combined = pd.DataFrame()
             loaded_sheets = []
             
-            for month_name, sheet_name in [("11월", november_sheet), ("12월", december_sheet), ("1월", january_sheet)]:
+            for month_name, sheet_name in [("11월", november_sheet), ("12월", december_sheet), ("1월", january_sheet), ("2월", february_sheet)]:
                 if sheet_name:
                     try:
                         df_month = pd.read_excel(xls, sheet_name=sheet_name)
