@@ -75,8 +75,9 @@ st.markdown("""
 
 st.markdown("---")
 
-# 메모 저장/로드 함수
-MEMO_DATA_DIR = "memo_data"
+# 메모 저장/로드 함수 (스크립트 위치 기준 절대 경로 사용 → 서버 재시작/실행 위치와 무관하게 데이터 유지)
+_script_dir = os.path.dirname(os.path.abspath(__file__))
+MEMO_DATA_DIR = os.path.join(_script_dir, "memo_data")
 if not os.path.exists(MEMO_DATA_DIR):
     os.makedirs(MEMO_DATA_DIR)
 
@@ -996,8 +997,8 @@ if uploaded_file is not None:
         
         st.markdown("---")
         
-        # 전년도 매출이익금 매출 추이 그래프 (주차별)
-        st.subheader("📈 전년도 매출이익금 매출 추이 (연간 52주)")
+        # 전체 플랫폼 매출이익금 그래프 (주차별)
+        st.subheader("📈 전체 플랫폼 매출이익금")
         
         try:
             # 연도별 주차 계산 함수 (1년을 52주로 나누기)
@@ -1033,200 +1034,157 @@ if uploaded_file is not None:
                 
                 return week_number
             
-            # 2025년과 2026년 주차별 데이터 수집
-            weekly_data_2025 = {}
-            weekly_data_2026 = {}
+            def week_to_month_label(year, week_number):
+                """연도와 주차(1~52)를 받아 'X월 Y주차' 문자열 반환"""
+                year_start = pd.Timestamp(year, 1, 1)
+                year_start_weekday = year_start.weekday()
+                first_week_monday = year_start - pd.Timedelta(days=year_start_weekday)
+                week_monday = first_week_monday + pd.Timedelta(days=(week_number - 1) * 7)
+                month = week_monday.month
+                day_of_month = week_monday.day
+                week_in_month = (day_of_month - 1) // 7 + 1
+                return f"{month}월 {week_in_month}주차"
             
-            # 2025 통합 raw 시트 찾기
-            sheet_2025 = None
-            for sheet_name in sheet_names:
-                if '2025' in sheet_name and '통합' in sheet_name and 'raw' in sheet_name.lower():
-                    sheet_2025 = sheet_name
-                    break
+            def get_month_week_ranges(year):
+                """연도별로 월(1~12)마다 해당하는 주차 범위 [x0, x1] 리스트 반환. x는 주차(1~52) 기준."""
+                year_start = pd.Timestamp(year, 1, 1)
+                year_start_weekday = year_start.weekday()
+                first_week_monday = year_start - pd.Timedelta(days=year_start_weekday)
+                month_ranges = []  # [(month, x0, x1), ...]
+                for week_num in range(1, 53):
+                    week_monday = first_week_monday + pd.Timedelta(days=(week_num - 1) * 7)
+                    month = week_monday.month
+                    if not month_ranges or month_ranges[-1][0] != month:
+                        month_ranges.append([month, week_num, week_num])
+                    else:
+                        month_ranges[-1][2] = week_num
+                return [(m, x0, x1) for m, x0, x1 in month_ranges]
             
-            # 2026년 1월 raw, 2026년 2월 raw 시트 찾기
-            sheet_2026_jan = None
-            sheet_2026_feb = None
-            for sheet_name in sheet_names:
-                if '2026' in sheet_name and 'raw' in sheet_name.lower():
-                    if '1월' in sheet_name:
-                        sheet_2026_jan = sheet_name
-                    elif '2월' in sheet_name:
-                        sheet_2026_feb = sheet_name
+            # 전년도 매출 비교.xlsx 사용: 주문일(날짜), 매출총이익, 구분 → 4개 그래프 (컬럼 이름 우선, 인덱스 보조)
+            compare_path = os.path.join(_script_dir, "전년도 매출 비교.xlsx")
+            if not os.path.exists(compare_path):
+                compare_path = "전년도 매출 비교.xlsx"
+            compare_df = None
+            date_col_compare = None
+            profit_col_compare = None
+            gubun_col = None
             
-            # 2025년 데이터 처리 (2025 통합 raw 시트)
-            if sheet_2025:
+            if os.path.exists(compare_path):
                 try:
-                    df_2025 = pd.read_excel(xls, sheet_name=sheet_2025)
-                    
-                    # E열 찾기 (인덱스 4, 날짜)
-                    e_column_index = 4
-                    date_col = None
-                    if len(df_2025.columns) > e_column_index:
-                        date_col = df_2025.columns[e_column_index]
-                    
-                    # M열 찾기 (인덱스 12, 매출총이익)
-                    m_column_index = 12
-                    profit_col = None
-                    if len(df_2025.columns) > m_column_index:
-                        profit_col = df_2025.columns[m_column_index]
-                    
-                    if date_col and profit_col:
-                        # 날짜 데이터 타입 변환
-                        df_2025[date_col] = pd.to_datetime(df_2025[date_col], errors='coerce')
-                        
-                        # 매출이익금 데이터 타입 변환
-                        if df_2025[profit_col].dtype == 'object':
-                            df_2025[profit_col] = pd.to_numeric(df_2025[profit_col], errors='coerce')
-                        
-                        # 주차 계산 및 집계
-                        df_2025['주차'] = df_2025[date_col].apply(lambda x: get_year_week(x, 2025) if pd.notna(x) else None)
-                        
-                        # 주차별 매출이익금 집계
-                        df_2025_filtered = df_2025[df_2025['주차'].notna()]
-                        if len(df_2025_filtered) > 0:
-                            weekly_profit = df_2025_filtered.groupby('주차')[profit_col].sum().reset_index()
-                            weekly_profit.columns = ['주차', '매출이익금']
-                            
-                            for _, row in weekly_profit.iterrows():
-                                week = int(row['주차'])
-                                if week not in weekly_data_2025:
-                                    weekly_data_2025[week] = 0
-                                weekly_data_2025[week] += row['매출이익금']
-                
+                    xls_compare = pd.ExcelFile(compare_path)
+                    # 첫 시트 사용 (시트가 여러 개면 첫 시트; 필요 시 sheet_names에서 특정 시트 선택 가능)
+                    compare_df = pd.read_excel(xls_compare, sheet_name=xls_compare.sheet_names[0])
+                    cols = compare_df.columns
+                    # 컬럼 이름으로 찾기 (공백/대소문자 무시)
+                    def find_col(name_candidates, index_fallback):
+                        for c in cols:
+                            c_str = str(c).strip().lower()
+                            for n in name_candidates:
+                                if n in c_str or c_str in n:
+                                    return c
+                        return cols[index_fallback] if len(cols) > index_fallback else None
+                    date_col_compare = find_col(['주문일', '날짜', 'date', '일자'], 4)
+                    profit_col_compare = find_col(['매출총이익', '매출이익', '이익', 'profit'], 12)
+                    # O열 구분: 헤더 '구분' 또는 이름에 '구분' 포함, 없으면 O열(15번째, 인덱스 14) 사용
+                    gubun_col = None
+                    for c in cols:
+                        s = str(c).strip()
+                        if s == '구분' or '구분' in s:
+                            gubun_col = c
+                            break
+                    if gubun_col is None and len(cols) > 14:
+                        gubun_col = cols[14]  # O열
+                    if gubun_col is None:
+                        gubun_col = find_col(['플랫폼', 'category', 'gubun'], 14)
+                    if date_col_compare and profit_col_compare:
+                        compare_df[date_col_compare] = pd.to_datetime(compare_df[date_col_compare], errors='coerce')
+                        compare_df[profit_col_compare] = pd.to_numeric(compare_df[profit_col_compare], errors='coerce')
+                        compare_df['_년'] = compare_df[date_col_compare].dt.year
+                        compare_df['_주차'] = compare_df.apply(lambda r: get_year_week(r[date_col_compare], int(r['_년'])) if pd.notna(r[date_col_compare]) and pd.notna(r['_년']) else None, axis=1)
+                        compare_df = compare_df[compare_df['_주차'].notna()]
+                        compare_df = compare_df[compare_df['_년'].isin([2025, 2026])]
+                        if gubun_col is not None:
+                            compare_df[gubun_col] = compare_df[gubun_col].astype(str).str.strip()
                 except Exception as e:
-                    st.warning(f"⚠️ 2025 통합 raw 시트 처리 중 오류: {str(e)}")
+                    st.warning(f"⚠️ 전년도 매출 비교.xlsx 로드 중 오류: {str(e)}")
+                    compare_df = None
             
-            # 2026년 데이터 처리 (2026년 1월 raw, 2026년 2월 raw 시트 - E열 날짜, N열 매출총이익)
-            def load_2026_raw(sheet_name):
-                if not sheet_name:
-                    return
-                try:
-                    df_2026 = pd.read_excel(xls, sheet_name=sheet_name)
-                    e_column_index = 4
-                    n_column_index = 13
-                    date_col = df_2026.columns[e_column_index] if len(df_2026.columns) > e_column_index else None
-                    profit_col = df_2026.columns[n_column_index] if len(df_2026.columns) > n_column_index else None
-                    if not date_col or not profit_col:
-                        return
-                    df_2026[date_col] = pd.to_datetime(df_2026[date_col], errors='coerce')
-                    if df_2026[profit_col].dtype == 'object':
-                        df_2026[profit_col] = pd.to_numeric(df_2026[profit_col], errors='coerce')
-                    df_2026['주차'] = df_2026[date_col].apply(lambda x: get_year_week(x, 2026) if pd.notna(x) else None)
-                    df_2026_filtered = df_2026[df_2026['주차'].notna()]
-                    if len(df_2026_filtered) == 0:
-                        return
-                    weekly_profit = df_2026_filtered.groupby('주차')[profit_col].sum().reset_index()
-                    weekly_profit.columns = ['주차', '매출이익금']
-                    for _, row in weekly_profit.iterrows():
-                        week = int(row['주차'])
-                        if week not in weekly_data_2026:
-                            weekly_data_2026[week] = 0
-                        weekly_data_2026[week] += row['매출이익금']
-                except Exception as e:
-                    st.warning(f"⚠️ {sheet_name} 시트 처리 중 오류: {str(e)}")
+            def build_weekly_from_compare(구분_목록=None):
+                """구분_목록이 None이면 전체, 리스트면 해당 구분만 필터 후 주차별 합산"""
+                w25 = {}
+                w26 = {}
+                if compare_df is None or len(compare_df) == 0:
+                    return w25, w26
+                sub = compare_df.copy()
+                if 구분_목록 is not None and gubun_col is not None:
+                    sub = sub[sub[gubun_col].isin(구분_목록)]
+                if len(sub) == 0:
+                    return w25, w26
+                agg = sub.groupby(['_년', '_주차'])[profit_col_compare].sum().reset_index()
+                for _, row in agg.iterrows():
+                    yr, wk = int(row['_년']), int(row['_주차'])
+                    g = row[profit_col_compare]
+                    if yr == 2025:
+                        w25[wk] = w25.get(wk, 0) + g
+                    elif yr == 2026:
+                        w26[wk] = w26.get(wk, 0) + g
+                return w25, w26
             
-            load_2026_raw(sheet_2026_jan)
-            load_2026_raw(sheet_2026_feb)
-            
-            # 시트를 찾지 못한 경우 안내
-            if not sheet_2025:
-                st.info("💡 '2025 통합 raw' 시트를 찾을 수 없습니다.")
-            if not sheet_2026_jan and not sheet_2026_feb:
-                st.info("💡 '2026년 1월 raw' 또는 '2026년 2월 raw' 시트를 찾을 수 없습니다.")
-            
-            # 그래프 데이터 준비
-            if len(weekly_data_2025) > 0 or len(weekly_data_2026) > 0:
-                # 1주차부터 52주차까지 모든 주차에 대해 데이터 준비
-                weeks = list(range(1, 53))
-                data_2025 = [weekly_data_2025.get(week, 0) for week in weeks]
-                data_2026 = [weekly_data_2026.get(week, 0) for week in weeks]
-                
-                # 디버깅: 실제 수집된 주차 범위 확인
-                if len(weekly_data_2025) > 0:
-                    max_week_2025 = max(weekly_data_2025.keys())
-                    st.caption(f"📊 2025년 데이터: {min(weekly_data_2025.keys())}주차 ~ {max_week_2025}주차 (총 {len(weekly_data_2025)}주차)")
-                if len(weekly_data_2026) > 0:
-                    max_week_2026 = max(weekly_data_2026.keys())
-                    st.caption(f"📊 2026년 데이터: {min(weekly_data_2026.keys())}주차 ~ {max_week_2026}주차 (총 {len(weekly_data_2026)}주차)")
-                
-                # 그래프 생성
+            def draw_compare_chart(weekly_2025, weekly_2026, chart_title):
+                weeks = list(range(2, 53))
+                data_2025 = [weekly_2025.get(w, 0) for w in weeks]
+                data_2026 = [weekly_2026.get(w, 0) for w in weeks]
                 fig = go.Figure()
-                
-                # 2025년 데이터
-                if len(weekly_data_2025) > 0:
-                    fig.add_trace(go.Bar(
-                        x=weeks,
-                        y=data_2025,
-                        name='2025',
-                        marker_color='#1f77b4',  # 파란색
-                        text=[f'{x:,.0f}' if x > 0 else '' for x in data_2025],
-                        textposition='outside'
-                    ))
-                
-                # 2026년 데이터
-                if len(weekly_data_2026) > 0:
-                    fig.add_trace(go.Bar(
-                        x=weeks,
-                        y=data_2026,
-                        name='2026',
-                        marker_color='#808080',  # 회색
-                        text=[f'{x:,.0f}' if x > 0 else '' for x in data_2026],
-                        textposition='outside'
-                    ))
-                
-                # 그래프 레이아웃 설정
-                # 모든 주차(1~52)에 대한 틱 값 생성
-                tick_vals = list(range(1, 53, 4))  # 1, 5, 9, 13, 17, 21, 25, 29, 33, 37, 41, 45, 49
-                if 52 not in tick_vals:
-                    tick_vals.append(52)  # 52주차도 포함
-                
-                fig.update_layout(
-                    title='전년도 매출이익금 매출 추이 (연간 52주)',
-                    xaxis_title='주차',
-                    yaxis_title='매출이익금 (원)',
-                    barmode='group',
-                    xaxis=dict(
-                        tickmode='array',
-                        tickvals=tick_vals,
-                        ticktext=[f'{w}주' for w in tick_vals],
-                        range=[0.5, 52.5],  # 1주차부터 52주차까지 명확히 표시
-                        showgrid=True
-                    ),
-                    yaxis=dict(
-                        tickformat=',.0f'
-                    ),
-                    height=600,
-                    legend=dict(
-                        orientation="h",
-                        yanchor="bottom",
-                        y=1.02,
-                        xanchor="right",
-                        x=1
-                    )
-                )
-                
+                # 데이터 없어도 2025/2026 막대는 항상 추가해 4개 그래프가 모두 보이도록 함
+                fig.add_trace(go.Bar(x=weeks, y=data_2025, name='2025', marker_color='#1f77b4', text=[f'{week_to_month_label(2025, w)} {x:,.0f} 원' if x > 0 else '' for w, x in zip(weeks, data_2025)], textposition='outside', hovertemplate='%{text}<extra></extra>'))
+                fig.add_trace(go.Bar(x=weeks, y=data_2026, name='2026', marker_color='#808080', text=[f'{week_to_month_label(2026, w)} {x:,.0f} 원' if x > 0 else '' for w, x in zip(weeks, data_2026)], textposition='outside', hovertemplate='%{text}<extra></extra>'))
+                month_ranges = get_month_week_ranges(2025)
+                visible_month_ranges = [(m, max(x0, 2), x1) for m, x0, x1 in month_ranges if x1 >= 2]
+                shapes = []
+                for i, (month, x0, x1) in enumerate(visible_month_ranges):
+                    fill_color = 'rgba(200, 220, 240, 0.35)' if i % 2 == 0 else 'rgba(230, 235, 245, 0.5)'
+                    shapes.append(dict(type='rect', xref='x', yref='paper', x0=x0 - 0.5, x1=x1 + 0.5, y0=0, y1=1, fillcolor=fill_color, line=dict(width=0), layer='below'))
+                for month, x0, x1 in visible_month_ranges:
+                    shapes.append(dict(type='line', xref='x', yref='paper', x0=x1 + 0.5, x1=x1 + 0.5, y0=0, y1=1, line=dict(color='rgba(180, 190, 200, 0.7)', width=1), layer='below'))
+                shapes.append(dict(type='line', xref='x', yref='paper', x0=1.5, x1=1.5, y0=0, y1=1, line=dict(color='rgba(180, 190, 200, 0.7)', width=1), layer='below'))
+                tickvals = [(x0 + x1) / 2 for month, x0, x1 in visible_month_ranges]
+                ticktext = [f'{month}월' for month, x0, x1 in visible_month_ranges]
+                fig.update_layout(title=chart_title, xaxis_title='주차', yaxis_title='매출이익금 (원)', barmode='group', shapes=shapes, xaxis=dict(tickmode='array', tickvals=tickvals, ticktext=ticktext, range=[1.5, 52.5], showgrid=False, ticklen=4), yaxis=dict(tickformat=',.0f'), height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 st.plotly_chart(fig, use_container_width=True)
-                
-                # 주차별 데이터 요약 표시
-                if len(weekly_data_2025) > 0 or len(weekly_data_2026) > 0:
-                    col_summary1, col_summary2 = st.columns(2)
-                    
-                    with col_summary1:
-                        if len(weekly_data_2025) > 0:
-                            total_2025 = sum(weekly_data_2025.values())
-                            avg_2025 = total_2025 / len(weekly_data_2025) if len(weekly_data_2025) > 0 else 0
-                            st.metric("2025년 총 매출이익금", f"{total_2025:,.0f}원")
-                            st.metric("2025년 주평균 매출이익금", f"{avg_2025:,.0f}원")
-                    
-                    with col_summary2:
-                        if len(weekly_data_2026) > 0:
-                            total_2026 = sum(weekly_data_2026.values())
-                            avg_2026 = total_2026 / len(weekly_data_2026) if len(weekly_data_2026) > 0 else 0
-                            st.metric("2026년 총 매출이익금", f"{total_2026:,.0f}원")
-                            st.metric("2026년 주평균 매출이익금", f"{avg_2026:,.0f}원")
+            
+            if compare_df is not None and len(compare_df) > 0 and date_col_compare and profit_col_compare:
+                # O열 구분 값으로 4개 그래프 생성 (1.전체 2.삼성몰 3.타 폐쇄몰 4.2파트)
+                if gubun_col is not None:
+                    구분_그래프_목록 = [
+                        (None, '전체 매출이익금'),           # 1. 전체 그래프 (필터 없음)
+                        (['삼성몰'], '삼성몰 매출이익금'),   # 2. 삼성몰 그래프
+                        (['타 폐쇄몰'], '타 폐쇄몰 매출이익금'),  # 3. 타 폐쇄몰 그래프
+                        (['2파트'], '2파트 매출이익금'),     # 4. 2파트 그래프
+                    ]
+                    for idx, (구분_필터, 차트_제목) in enumerate(구분_그래프_목록):
+                        w25, w26 = build_weekly_from_compare(구분_필터)
+                        draw_compare_chart(w25, w26, 차트_제목)
+                        total_25 = sum(w25.values())
+                        total_26 = sum(w26.values())
+                        st.markdown(f"**{차트_제목}** · 2025년 합계: **{total_25:,.0f}원**  |  2026년 합계: **{total_26:,.0f}원**")
+                        if idx == 0:
+                            st.caption("※ 발주서 기준 금액이며, 반품/취소는 반영되지 않았습니다.")
+                        st.markdown("---")
+                else:
+                    # 구분 컬럼 없으면 전체만 표시
+                    w25, w26 = build_weekly_from_compare(None)
+                    draw_compare_chart(w25, w26, '전체 매출이익금')
+                    total_25 = sum(w25.values())
+                    total_26 = sum(w26.values())
+                    st.markdown(f"**전체 매출이익금** · 2025년 합계: **{total_25:,.0f}원**  |  2026년 합계: **{total_26:,.0f}원**")
+                    st.caption("발주서 기준 금액이며, 반품/취소는 반영되지 않았습니다.")
+                    st.caption("💡 O열 '구분' 컬럼이 있으면 전체·삼성몰·타 폐쇄몰·2파트 4개 그래프가 표시됩니다.")
             else:
-                st.info("💡 2025년 또는 2026년 주차별 데이터를 찾을 수 없습니다.")
+                if not os.path.exists(compare_path):
+                    st.info("💡 '전년도 매출 비교.xlsx' 파일을 스크립트와 같은 폴더에 넣어주세요.")
+                else:
+                    st.info("💡 전년도 매출 비교.xlsx에서 주문일(날짜), 매출총이익 컬럼을 확인해주세요.")
+            
         
         except Exception as e:
             st.warning(f"⚠️ 전년도 매출이익금 추이 그래프 생성 중 오류 발생: {str(e)}")
