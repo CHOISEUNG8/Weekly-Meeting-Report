@@ -301,8 +301,10 @@ if uploaded_file is not None:
         selected_month = None
         if '1월' in selected_sheet and '11' not in selected_sheet and '12' not in selected_sheet:
             selected_month = 1
-        elif '2월' in selected_sheet or ('2' in selected_sheet and '월' in selected_sheet and '12' not in selected_sheet):
+        elif '2월' in selected_sheet or 'february' in selected_sheet.lower() or 'feb' in selected_sheet.lower():
             selected_month = 2
+        elif '3월' in selected_sheet or ('3' in selected_sheet and '월' in selected_sheet):
+            selected_month = 3
         elif '12월' in selected_sheet or ('12' in selected_sheet and '월' in selected_sheet):
             selected_month = 12
         elif '11월' in selected_sheet or ('11' in selected_sheet and '월' in selected_sheet):
@@ -997,8 +999,10 @@ if uploaded_file is not None:
         
         st.markdown("---")
         
-        # 전체 플랫폼 매출이익금 그래프 (주차별)
-        st.subheader("📈 전체 플랫폼 매출이익금")
+        # 전체 플랫폼 매출이익금 그래프 (주차별) 표시 여부
+        hide_platform_profit_charts = True
+        if not hide_platform_profit_charts:
+            st.subheader("📈 전체 플랫폼 매출이익금")
         
         try:
             # 연도별 주차 계산 함수 (1년을 52주로 나누기)
@@ -1152,7 +1156,7 @@ if uploaded_file is not None:
                 fig.update_layout(title=chart_title, xaxis_title='주차', yaxis_title='매출이익금 (원)', barmode='group', shapes=shapes, xaxis=dict(tickmode='array', tickvals=tickvals, ticktext=ticktext, range=[1.5, 52.5], showgrid=False, ticklen=4), yaxis=dict(tickformat=',.0f'), height=500, legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1))
                 st.plotly_chart(fig, use_container_width=True)
             
-            if compare_df is not None and len(compare_df) > 0 and date_col_compare and profit_col_compare:
+            if not hide_platform_profit_charts and compare_df is not None and len(compare_df) > 0 and date_col_compare and profit_col_compare:
                 # O열 구분 값으로 4개 그래프 생성 (1.전체 2.삼성몰 3.타 폐쇄몰 4.2파트)
                 if gubun_col is not None:
                     구분_그래프_목록 = [
@@ -1179,7 +1183,7 @@ if uploaded_file is not None:
                     st.markdown(f"**전체 매출이익금** · 2025년 합계: **{total_25:,.0f}원**  |  2026년 합계: **{total_26:,.0f}원**")
                     st.caption("발주서 기준 금액이며, 반품/취소는 반영되지 않았습니다.")
                     st.caption("💡 O열 '구분' 컬럼이 있으면 전체·삼성몰·타 폐쇄몰·2파트 4개 그래프가 표시됩니다.")
-            else:
+            elif not hide_platform_profit_charts:
                 if not os.path.exists(compare_path):
                     st.info("💡 '전년도 매출 비교.xlsx' 파일을 스크립트와 같은 폴더에 넣어주세요.")
                 else:
@@ -1187,7 +1191,8 @@ if uploaded_file is not None:
             
         
         except Exception as e:
-            st.warning(f"⚠️ 전년도 매출이익금 추이 그래프 생성 중 오류 발생: {str(e)}")
+            if not hide_platform_profit_charts:
+                st.warning(f"⚠️ 전년도 매출이익금 추이 그래프 생성 중 오류 발생: {str(e)}")
         
         st.markdown("---")
 
@@ -1460,30 +1465,65 @@ if uploaded_file is not None:
                         if month_for_calculation is None:
                             month_for_calculation = pd.Timestamp.now().month
                     
-                    for week_num in unique_weeks_sorted:
-                        start_date, end_date = get_week_date_range(week_num, month_for_calculation, min_week, year)
-                        if start_date and end_date:
-                            # 시작일(금요일)의 월을 기준으로 주차 레이블 결정
-                            start_month = start_date.month
-                            
-                            # 시작일이 선택된 월과 다르면 해당 주차는 제외 (다른 월에서 표시되어야 함)
-                            if selected_month is not None and start_month != selected_month:
-                                continue  # 이 주차는 제외하고 다음 주차로
-                            
-                            # 시작일이 선택된 월과 같으면 기존 레이블 사용
-                            week_korean = df[df['주차'] == week_num]['주차_한글'].iloc[0] if len(df[df['주차'] == week_num]) > 0 else f"{month_label} {week_num}주"
-                            
-                            # 요일을 한국어로 변환
+                    today_date = pd.Timestamp.now().normalize()
+                    if selected_month is not None:
+                        # 선택 월의 첫째주는 "해당 월 1일이 포함된 금~목 구간"으로 계산
+                        # 예: 2026년 3월 첫째주 = 2026-02-27(금) ~ 2026-03-05(목)
+                        display_year = year if year is not None else pd.Timestamp.now().year
+                        first_day = pd.Timestamp(year=display_year, month=selected_month, day=1)
+                        days_to_prev_friday = (first_day.weekday() - 4) % 7
+                        first_week_start = first_day - pd.Timedelta(days=days_to_prev_friday)
+                        week_korean_labels = ['첫째', '둘째', '셋째', '넷째', '다섯째']
+
+                        for idx in range(5):
+                            start_date = first_week_start + pd.Timedelta(days=idx * 7)
+                            end_date = start_date + pd.Timedelta(days=6)
+
+                            # 종료일(목요일)이 선택 월인 구간만 해당 월 주차로 표시
+                            if end_date.month != selected_month:
+                                continue
+                            # 해당 주차 시작일(금요일)에 도달했을 때만 표기
+                            if today_date < start_date.normalize():
+                                continue
+
                             weekdays_kr = ['월', '화', '수', '목', '금', '토', '일']
                             start_weekday_kr = weekdays_kr[start_date.weekday()]
                             end_weekday_kr = weekdays_kr[end_date.weekday()]
-                            
+
                             week_info_list.append({
-                                '주차': week_korean,
+                                '주차': f"{selected_month}월 {week_korean_labels[idx]}주",
                                 '시작일': start_date.strftime('%Y-%m-%d') + f' ({start_weekday_kr})',
                                 '종료일': end_date.strftime('%Y-%m-%d') + f' ({end_weekday_kr})',
                                 '기간': f"{start_date.strftime('%m/%d')} ~ {end_date.strftime('%m/%d')}"
                             })
+                    else:
+                        for week_num in unique_weeks_sorted:
+                            start_date, end_date = get_week_date_range(week_num, month_for_calculation, min_week, year)
+                            if start_date and end_date:
+                                # 해당 주차 시작일(금요일)에 도달했을 때만 표기
+                                if today_date < start_date.normalize():
+                                    continue
+                                # 시작일(금요일)의 월을 기준으로 주차 레이블 결정
+                                start_month = start_date.month
+
+                                # 시작일이 선택된 월과 다르면 해당 주차는 제외 (다른 월에서 표시되어야 함)
+                                if selected_month is not None and start_month != selected_month:
+                                    continue  # 이 주차는 제외하고 다음 주차로
+
+                                # 시작일이 선택된 월과 같으면 기존 레이블 사용
+                                week_korean = df[df['주차'] == week_num]['주차_한글'].iloc[0] if len(df[df['주차'] == week_num]) > 0 else f"{month_label} {week_num}주"
+
+                                # 요일을 한국어로 변환
+                                weekdays_kr = ['월', '화', '수', '목', '금', '토', '일']
+                                start_weekday_kr = weekdays_kr[start_date.weekday()]
+                                end_weekday_kr = weekdays_kr[end_date.weekday()]
+
+                                week_info_list.append({
+                                    '주차': week_korean,
+                                    '시작일': start_date.strftime('%Y-%m-%d') + f' ({start_weekday_kr})',
+                                    '종료일': end_date.strftime('%Y-%m-%d') + f' ({end_weekday_kr})',
+                                    '기간': f"{start_date.strftime('%m/%d')} ~ {end_date.strftime('%m/%d')}"
+                                })
                     
                     if week_info_list:
                         week_info_df = pd.DataFrame(week_info_list)
@@ -2525,11 +2565,12 @@ if uploaded_file is not None:
         
         # 2025년 판매분석 시트가 없거나 로드 실패한 경우 기존 방식 사용
         if df_analysis_base is None or len(df_analysis_base) == 0:
-            # 11월, 12월, 1월, 2월 시트 찾기 및 합산
+            # 11월, 12월, 1월, 2월, 3월 시트 찾기 및 합산
             november_sheet = None
             december_sheet = None
             january_sheet = None
             february_sheet = None
+            march_sheet = None
             for sheet in sheet_names:
                 sheet_lower = sheet.lower()
                 # 11월 시트 찾기 (2025년 11월 raw 시트는 제외)
@@ -2539,14 +2580,16 @@ if uploaded_file is not None:
                     december_sheet = sheet
                 if '1월' in sheet or ('1' in sheet and '월' in sheet and '11' not in sheet and '12' not in sheet) or 'january' in sheet_lower or 'jan' in sheet_lower:
                     january_sheet = sheet
-                if '2월' in sheet or ('2' in sheet and '월' in sheet and '12' not in sheet) or 'february' in sheet_lower or 'feb' in sheet_lower:
+                if '2월' in sheet or 'february' in sheet_lower or 'feb' in sheet_lower:
                     february_sheet = sheet
+                if '3월' in sheet or ('3' in sheet and '월' in sheet) or 'march' in sheet_lower or 'mar' in sheet_lower:
+                    march_sheet = sheet
             
-            # 11월, 12월, 1월, 2월 시트를 모두 로드하여 합산
+            # 11월, 12월, 1월, 2월, 3월 시트를 모두 로드하여 합산
             df_combined = pd.DataFrame()
             loaded_sheets = []
             
-            for month_name, sheet_name in [("11월", november_sheet), ("12월", december_sheet), ("1월", january_sheet), ("2월", february_sheet)]:
+            for month_name, sheet_name in [("11월", november_sheet), ("12월", december_sheet), ("1월", january_sheet), ("2월", february_sheet), ("3월", march_sheet)]:
                 if sheet_name:
                     try:
                         df_month = pd.read_excel(xls, sheet_name=sheet_name)
