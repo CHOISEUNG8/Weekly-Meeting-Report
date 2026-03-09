@@ -1482,8 +1482,8 @@ if uploaded_file is not None:
                             # 종료일(목요일)이 선택 월인 구간만 해당 월 주차로 표시
                             if end_date.month != selected_month:
                                 continue
-                            # 해당 주차 시작일(금요일)에 도달했을 때만 표기
-                            if today_date < start_date.normalize():
+                            # 해당 주차 종료일(목요일)이 지난 후에만 표기
+                            if today_date <= end_date.normalize():
                                 continue
 
                             weekdays_kr = ['월', '화', '수', '목', '금', '토', '일']
@@ -1500,8 +1500,8 @@ if uploaded_file is not None:
                         for week_num in unique_weeks_sorted:
                             start_date, end_date = get_week_date_range(week_num, month_for_calculation, min_week, year)
                             if start_date and end_date:
-                                # 해당 주차 시작일(금요일)에 도달했을 때만 표기
-                                if today_date < start_date.normalize():
+                                # 해당 주차 종료일(목요일)이 지난 후에만 표기
+                                if today_date <= end_date.normalize():
                                     continue
                                 # 시작일(금요일)의 월을 기준으로 주차 레이블 결정
                                 start_month = start_date.month
