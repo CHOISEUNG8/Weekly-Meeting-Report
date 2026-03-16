@@ -3115,6 +3115,12 @@ if uploaded_file is not None:
         if '주차_한글' in df.columns:
             # 고유한 주차 목록 가져오기 (올바른 순서로 정렬)
             unique_weeks = sort_weeks_korean_for_part(df['주차_한글'].unique().tolist())
+
+            # 예외 처리: 3월 계획(파트별)에서는 3월 둘째주 선택지를 항상 제공
+            march_second_week = "3월 둘째주"
+            if selected_month == 3 and march_second_week not in unique_weeks:
+                unique_weeks.append(march_second_week)
+                unique_weeks = sort_weeks_korean_for_part(unique_weeks)
             
             if len(unique_weeks) > 0:
                 # 사이드바와 메인 페이지 동기화를 위한 키 (month_label 사용)
