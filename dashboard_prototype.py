@@ -285,9 +285,19 @@ if uploaded_file is not None:
                 december_sheet = sheet
         
         # 시트 선택 기본값 설정
-        # 첫 번째 시트를 기본값으로 설정
+        # 2026년 2월 raw 시트가 있으면 우선 선택, 없으면 첫 번째 시트 사용
+        default_sheet_index = 0
+        for idx, sheet in enumerate(sheet_names):
+            sheet_lower = sheet.lower()
+            if (
+                '2026' in sheet
+                and ('2월' in sheet or 'february' in sheet_lower or 'feb' in sheet_lower)
+                and 'raw' in sheet_lower
+            ):
+                default_sheet_index = idx
+                break
         if len(sheet_names) > 0:
-            selected_sheet = st.selectbox("시트 선택", sheet_names, index=0)
+            selected_sheet = st.selectbox("시트 선택", sheet_names, index=default_sheet_index)
         else:
             st.error("⚠️ 사용 가능한 시트가 없습니다.")
             selected_sheet = None
@@ -296,6 +306,7 @@ if uploaded_file is not None:
             st.stop()
         
         df = pd.read_excel(xls, sheet_name=selected_sheet)
+        is_raw_selected_sheet = 'raw' in selected_sheet.lower()
         
         # 선택된 시트에서 월 정보 추출
         selected_month = None
@@ -343,6 +354,16 @@ if uploaded_file is not None:
                 df['년'] = df[date_col].dt.year
                 df['월'] = df[date_col].dt.month
                 df['년월'] = df[date_col].dt.to_period('M')
+
+                # raw 시트는 B열(주문월)을 월 기준으로 우선 반영
+                order_month_series = None
+                if len(df.columns) > 1:
+                    b_col = df.columns[1]  # B열
+                    order_month_series = pd.to_numeric(df[b_col], errors='coerce')
+                    if order_month_series.between(1, 12).sum() > 0:
+                        df['주문월'] = order_month_series
+                        if is_raw_selected_sheet:
+                            df['월'] = order_month_series
                 
                 # 선택된 월 데이터만 필터링 (11월 또는 12월)
                 if '월' in df.columns and selected_month is not None:
@@ -634,6 +655,20 @@ if uploaded_file is not None:
             # 년도 선택 필터 숨김 (기본값으로 모든 년도 선택)
             selected_years = years
             df = df[df['년'].isin(selected_years)]
+
+        # 목표 달성 계산용 월 기준 컬럼 결정
+        # 우선순위: B열(주문월) -> 기존 월 컬럼
+        order_month_col = None
+        target_month_series = None
+        if len(df.columns) > 1:
+            order_month_col = df.columns[1]  # B열
+            target_month_series = pd.to_numeric(df[order_month_col], errors='coerce')
+            # 주문월로 보기 어려운 데이터면 기존 월 컬럼 사용
+            valid_month_count = target_month_series.between(1, 12).sum()
+            if valid_month_count == 0:
+                target_month_series = None
+        if target_month_series is None and '월' in df.columns:
+            target_month_series = pd.to_numeric(df['월'], errors='coerce')
         
         # 선택된 월 데이터만 표시 중이면 월 필터는 숨김
         if '월' in df.columns:
@@ -712,8 +747,8 @@ if uploaded_file is not None:
             month_num = None
             if selected_month is not None:
                 month_num = selected_month
-            elif len(df) > 0 and '월' in df.columns:
-                unique_months = sorted(df['월'].dropna().unique())
+            elif len(df) > 0 and target_month_series is not None:
+                unique_months = sorted(target_month_series.dropna().astype(int).unique())
                 if len(unique_months) == 1:
                     month_num = int(unique_months[0])
                 elif len(selected_months) == 1:
@@ -794,36 +829,48 @@ if uploaded_file is not None:
         part2_mask = None
         part1_count = 0
         part2_count = 0
+
+        # 목표 달성 계산 시 월 기준(B열 주문월 우선)으로 데이터 재필터링
+        df_target = df.copy()
+        if target_month_series is not None:
+            if selected_month is not None:
+                target_mask = target_month_series == selected_month
+                if target_mask.any():
+                    df_target = df[target_mask].copy()
+            elif 'selected_months' in locals() and len(selected_months) == 1:
+                target_mask = target_month_series == int(selected_months[0])
+                if target_mask.any():
+                    df_target = df[target_mask].copy()
         
         if amount_col is not None:
             # 금액 컬럼이 숫자형이 아니면 변환 시도
-            if df[amount_col].dtype == 'object':
-                df[amount_col] = pd.to_numeric(df[amount_col], errors='coerce')
+            if df_target[amount_col].dtype == 'object':
+                df_target[amount_col] = pd.to_numeric(df_target[amount_col], errors='coerce')
             
             if part_col is not None:
                 # 파트 컬럼이 있는 경우
                 # 1파트 데이터 필터링 (1, 1파트, part1 등)
                 part1_mask = (
-                    df[part_col].astype(str).str.contains('1파트|part1|^1$', na=False, regex=True) |
-                    (df[part_col].astype(str).str.strip() == '1')
+                    df_target[part_col].astype(str).str.contains('1파트|part1|^1$', na=False, regex=True) |
+                    (df_target[part_col].astype(str).str.strip() == '1')
                 )
                 if part1_mask.any():
-                    part1_achieved = df[part1_mask][amount_col].sum()
+                    part1_achieved = df_target[part1_mask][amount_col].sum()
                     part1_count = part1_mask.sum()
                 
                 # 2파트 데이터 필터링 (2, 2파트, part2 등)
                 part2_mask = (
-                    df[part_col].astype(str).str.contains('2파트|part2|^2$', na=False, regex=True) |
-                    (df[part_col].astype(str).str.strip() == '2')
+                    df_target[part_col].astype(str).str.contains('2파트|part2|^2$', na=False, regex=True) |
+                    (df_target[part_col].astype(str).str.strip() == '2')
                 )
                 if part2_mask.any():
-                    part2_achieved = df[part2_mask][amount_col].sum()
+                    part2_achieved = df_target[part2_mask][amount_col].sum()
                     part2_count = part2_mask.sum()
             else:
                 # 파트 컬럼이 없는 경우, 전체 데이터를 확인
                 # 사용자가 직접 입력하거나, 다른 방법으로 구분
                 with st.expander("💡 파트 컬럼이 없습니다. 수동으로 분할하세요."):
-                    total_amount = df[amount_col].sum()
+                    total_amount = df_target[amount_col].sum()
                     st.write(f"전체 N열 합계: {total_amount:,.0f}원")
                     part1_ratio = st.slider("1파트 비율 (%)", 0, 100, 90, key='part1_ratio')
                     part1_achieved = total_amount * (part1_ratio / 100)
@@ -838,9 +885,9 @@ if uploaded_file is not None:
                 st.write(f"**2파트 데이터 건수:** {part2_count}건")
         
         # 선택된 월 총 매출이익금 표시 (1파트 + 2파트 합계)
-        if amount_col is not None and '월' in df.columns and selected_month is not None and selected_month in df['월'].values:
+        if amount_col is not None and selected_month is not None:
             total_profit = part1_achieved + part2_achieved
-            total_count = len(df)
+            total_count = len(df_target)
             col_info1, col_info2 = st.columns(2)
             with col_info1:
                 st.info(f"📅 {selected_month}월 총 판매 수량 {total_count:,}건")
@@ -1467,8 +1514,8 @@ if uploaded_file is not None:
                     
                     today_date = pd.Timestamp.now().normalize()
                     if selected_month is not None:
-                        # 선택 월의 첫째주는 "해당 월 1일이 포함된 금~목 구간"으로 계산
-                        # 예: 2026년 3월 첫째주 = 2026-02-27(금) ~ 2026-03-05(목)
+                        # 선택 월 주차는 시작일(금요일) 기준 월에만 반영
+                        # 예: 2026-02-27(금) ~ 2026-03-05(목)은 2월로 반영하고 3월에서는 제외
                         display_year = year if year is not None else pd.Timestamp.now().year
                         first_day = pd.Timestamp(year=display_year, month=selected_month, day=1)
                         days_to_prev_friday = (first_day.weekday() - 4) % 7
@@ -1479,8 +1526,8 @@ if uploaded_file is not None:
                             start_date = first_week_start + pd.Timedelta(days=idx * 7)
                             end_date = start_date + pd.Timedelta(days=6)
 
-                            # 종료일(목요일)이 선택 월인 구간만 해당 월 주차로 표시
-                            if end_date.month != selected_month:
+                            # 시작일(금요일)이 선택 월인 구간만 해당 월 주차로 표시
+                            if start_date.month != selected_month:
                                 continue
                             # 해당 주차 종료일(목요일)이 지난 후에만 표기
                             if today_date <= end_date.normalize():
@@ -2566,24 +2613,57 @@ if uploaded_file is not None:
         # 2025년 판매분석 시트가 없거나 로드 실패한 경우 기존 방식 사용
         if df_analysis_base is None or len(df_analysis_base) == 0:
             # 11월, 12월, 1월, 2월, 3월 시트 찾기 및 합산
+            # raw 시트가 있으면 raw 우선 사용
             november_sheet = None
             december_sheet = None
             january_sheet = None
             february_sheet = None
             march_sheet = None
+            november_sheet_non_raw = None
+            december_sheet_non_raw = None
+            january_sheet_non_raw = None
+            february_sheet_non_raw = None
+            march_sheet_non_raw = None
             for sheet in sheet_names:
                 sheet_lower = sheet.lower()
-                # 11월 시트 찾기 (2025년 11월 raw 시트는 제외)
-                if ('11월' in sheet or ('11' in sheet and '월' in sheet) or 'november' in sheet_lower or 'nov' in sheet_lower) and 'raw' not in sheet_lower:
-                    november_sheet = sheet
+                is_raw_sheet = 'raw' in sheet_lower
+                if '11월' in sheet or ('11' in sheet and '월' in sheet) or 'november' in sheet_lower or 'nov' in sheet_lower:
+                    if is_raw_sheet and november_sheet is None:
+                        november_sheet = sheet
+                    elif (not is_raw_sheet) and november_sheet_non_raw is None:
+                        november_sheet_non_raw = sheet
                 if '12월' in sheet or ('12' in sheet and '월' in sheet) or 'december' in sheet_lower or 'dec' in sheet_lower:
-                    december_sheet = sheet
+                    if is_raw_sheet and december_sheet is None:
+                        december_sheet = sheet
+                    elif (not is_raw_sheet) and december_sheet_non_raw is None:
+                        december_sheet_non_raw = sheet
                 if '1월' in sheet or ('1' in sheet and '월' in sheet and '11' not in sheet and '12' not in sheet) or 'january' in sheet_lower or 'jan' in sheet_lower:
-                    january_sheet = sheet
+                    if is_raw_sheet and january_sheet is None:
+                        january_sheet = sheet
+                    elif (not is_raw_sheet) and january_sheet_non_raw is None:
+                        january_sheet_non_raw = sheet
                 if '2월' in sheet or 'february' in sheet_lower or 'feb' in sheet_lower:
-                    february_sheet = sheet
+                    if is_raw_sheet and february_sheet is None:
+                        february_sheet = sheet
+                    elif (not is_raw_sheet) and february_sheet_non_raw is None:
+                        february_sheet_non_raw = sheet
                 if '3월' in sheet or ('3' in sheet and '월' in sheet) or 'march' in sheet_lower or 'mar' in sheet_lower:
-                    march_sheet = sheet
+                    if is_raw_sheet and march_sheet is None:
+                        march_sheet = sheet
+                    elif (not is_raw_sheet) and march_sheet_non_raw is None:
+                        march_sheet_non_raw = sheet
+
+            # raw가 없으면 non-raw로 fallback
+            if november_sheet is None:
+                november_sheet = november_sheet_non_raw
+            if december_sheet is None:
+                december_sheet = december_sheet_non_raw
+            if january_sheet is None:
+                january_sheet = january_sheet_non_raw
+            if february_sheet is None:
+                february_sheet = february_sheet_non_raw
+            if march_sheet is None:
+                march_sheet = march_sheet_non_raw
             
             # 11월, 12월, 1월, 2월, 3월 시트를 모두 로드하여 합산
             df_combined = pd.DataFrame()
