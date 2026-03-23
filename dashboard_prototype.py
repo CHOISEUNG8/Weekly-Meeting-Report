@@ -319,17 +319,59 @@ if uploaded_file is not None:
                 december_sheet = sheet
         
         # 시트 선택 기본값 설정
-        # 2026년 2월 raw 시트가 있으면 우선 선택, 없으면 첫 번째 시트 사용
+        # 가장 최근 년/월 시트를 기본으로 선택 (동일 월이면 raw 우선)
+        def detect_sheet_year_month(sheet_name):
+            sheet_lower = sheet_name.lower()
+
+            year = None
+            for y in [current_year + 1, current_year, current_year - 1, current_year - 2]:
+                if str(y) in sheet_name:
+                    year = y
+                    break
+            if year is None:
+                year = current_year
+
+            month = None
+            if '12월' in sheet_name or ('12' in sheet_name and '월' in sheet_name) or 'december' in sheet_lower or 'dec' in sheet_lower:
+                month = 12
+            elif '11월' in sheet_name or ('11' in sheet_name and '월' in sheet_name) or 'november' in sheet_lower or 'nov' in sheet_lower:
+                month = 11
+            elif '10월' in sheet_name or ('10' in sheet_name and '월' in sheet_name) or 'october' in sheet_lower or 'oct' in sheet_lower:
+                month = 10
+            elif '9월' in sheet_name or ('9' in sheet_name and '월' in sheet_name) or 'september' in sheet_lower or 'sep' in sheet_lower:
+                month = 9
+            elif '8월' in sheet_name or ('8' in sheet_name and '월' in sheet_name) or 'august' in sheet_lower or 'aug' in sheet_lower:
+                month = 8
+            elif '7월' in sheet_name or ('7' in sheet_name and '월' in sheet_name) or 'july' in sheet_lower or 'jul' in sheet_lower:
+                month = 7
+            elif '6월' in sheet_name or ('6' in sheet_name and '월' in sheet_name) or 'june' in sheet_lower or 'jun' in sheet_lower:
+                month = 6
+            elif '5월' in sheet_name or ('5' in sheet_name and '월' in sheet_name) or 'may' in sheet_lower:
+                month = 5
+            elif '4월' in sheet_name or ('4' in sheet_name and '월' in sheet_name) or 'april' in sheet_lower or 'apr' in sheet_lower:
+                month = 4
+            elif '3월' in sheet_name or ('3' in sheet_name and '월' in sheet_name) or 'march' in sheet_lower or 'mar' in sheet_lower:
+                month = 3
+            elif '2월' in sheet_name or 'february' in sheet_lower or 'feb' in sheet_lower:
+                month = 2
+            elif ('1월' in sheet_name and '11' not in sheet_name and '12' not in sheet_name) or ('january' in sheet_lower or 'jan' in sheet_lower):
+                month = 1
+
+            return year, month
+
         default_sheet_index = 0
+        best_score = None
         for idx, sheet in enumerate(sheet_names):
             sheet_lower = sheet.lower()
-            if (
-                '2026' in sheet
-                and ('2월' in sheet or 'february' in sheet_lower or 'feb' in sheet_lower)
-                and 'raw' in sheet_lower
-            ):
+            year, month = detect_sheet_year_month(sheet)
+            if month is None:
+                continue
+
+            raw_priority = 1 if 'raw' in sheet_lower else 0
+            score = (year, month, raw_priority)
+            if best_score is None or score > best_score:
+                best_score = score
                 default_sheet_index = idx
-                break
         if len(sheet_names) > 0:
             selected_sheet = st.selectbox("시트 선택", sheet_names, index=default_sheet_index)
         else:
