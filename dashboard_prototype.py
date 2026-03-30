@@ -944,10 +944,17 @@ if uploaded_file is not None:
         # 선택된 월 총 매출이익금 표시 (1파트 + 2파트 합계)
         if amount_col is not None and selected_month is not None:
             total_profit = part1_achieved + part2_achieved
+            # 총 판매 수량은 I열(9번째 컬럼) 합계 기준으로 표시
             total_count = len(df_target)
+            i_column_index_for_total = 8  # I열
+            if len(df_target.columns) > i_column_index_for_total:
+                sales_qty_total_col = df_target.columns[i_column_index_for_total]
+                sales_qty_series = pd.to_numeric(df_target[sales_qty_total_col], errors='coerce')
+                if sales_qty_series.notna().any():
+                    total_count = int(sales_qty_series.fillna(0).sum())
             col_info1, col_info2 = st.columns(2)
             with col_info1:
-                st.info(f"📅 {selected_month}월 총 판매 수량 {total_count:,}건")
+                st.info(f"📅 {selected_month}월 총 판매 수량 {total_count:,}개")
             with col_info2:
                 st.info(f"💰 {selected_month}월 총 매출이익금 {total_profit:,.0f}원")
         
@@ -1329,6 +1336,19 @@ if uploaded_file is not None:
                 product_name_col = col
                 break
 
+        # 업체명 컬럼 찾기
+        company_col = None
+        company_keywords = ['업체', '제조사', 'company', 'manufacturer', 'maker', '회사', '고객', 'customer', '제조업체']
+        for col in df.columns:
+            col_str = str(col).lower()
+            if any(keyword in col_str for keyword in company_keywords):
+                company_col = col
+                break
+
+        # 업체명 컬럼을 찾지 못한 경우 B열(인덱스 1) 시도
+        if company_col is None and len(df.columns) > 1:
+            company_col = df.columns[1]  # B열
+
         # 판매 수량 컬럼 찾기
         sales_qty_col = None
         sales_qty_keywords = ['판매수량', '판매 수량', '수량', 'quantity', 'qty', '판매량', 'sales', 'quantity']
@@ -1361,15 +1381,25 @@ if uploaded_file is not None:
             product_sales_qty.columns = ['상품코드', '총판매수량']
             product_sales_qty = product_sales_qty.sort_values('총판매수량', ascending=False).head(10)
 
+            # 업체명 매핑 추가
+            if company_col:
+                company_mapping = df.groupby(product_code_col)[company_col].apply(
+                    lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.iloc[0]
+                ).to_dict()
+                product_sales_qty['업체명'] = product_sales_qty['상품코드'].map(company_mapping)
+                product_sales_qty['업체명'] = product_sales_qty['업체명'].fillna('미확인')
+            else:
+                product_sales_qty['업체명'] = '미확인'
+
             # 상품명 추가
             if product_name_col:
                 product_name_mapping = df.groupby(product_code_col)[product_name_col].apply(lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.iloc[0]).to_dict()
                 product_sales_qty['상품명'] = product_sales_qty['상품코드'].map(product_name_mapping)
                 product_sales_qty['상품명'] = product_sales_qty['상품명'].fillna(product_sales_qty['상품코드'])
-                display_cols = ['상품명', '총판매수량']
+                display_cols = ['업체명', '상품명', '총판매수량']
             else:
                 product_sales_qty['상품명'] = product_sales_qty['상품코드']
-                display_cols = ['상품명', '총판매수량']
+                display_cols = ['업체명', '상품명', '총판매수량']
 
             # 표시용 데이터 포맷팅
             product_sales_qty_display = product_sales_qty.copy()
@@ -1443,14 +1473,24 @@ if uploaded_file is not None:
                 product_profit.columns = ['상품코드', '총매출이익금']
                 product_profit = product_profit.sort_values('총매출이익금', ascending=False).head(10)
 
+                # 업체명 매핑 추가
+                if company_col:
+                    company_mapping = df.groupby(product_code_col)[company_col].apply(
+                        lambda x: x.mode().iloc[0] if len(x.mode()) > 0 else x.iloc[0]
+                    ).to_dict()
+                    product_profit['업체명'] = product_profit['상품코드'].map(company_mapping)
+                    product_profit['업체명'] = product_profit['업체명'].fillna('미확인')
+                else:
+                    product_profit['업체명'] = '미확인'
+
                 # 상품명 추가
                 if product_name_col:
                     product_profit['상품명'] = product_profit['상품코드'].map(product_name_mapping)
                     product_profit['상품명'] = product_profit['상품명'].fillna(product_profit['상품코드'])
-                    display_cols = ['상품명', '총매출이익금']
+                    display_cols = ['업체명', '상품명', '총매출이익금']
                 else:
                     product_profit['상품명'] = product_profit['상품코드']
-                    display_cols = ['상품명', '총매출이익금']
+                    display_cols = ['업체명', '상품명', '총매출이익금']
 
                 # 표시용 데이터 포맷팅
                 product_profit_display = product_profit.copy()
@@ -1625,7 +1665,19 @@ if uploaded_file is not None:
                 
                 with col1:
                     # 주차별 총 판매수량과 매출이익금 통합 그래프
-                    weekly_data = df.groupby(['주차', '주차_한글']).size().reset_index(name='건수')
+                    i_column_index_for_trend = 8  # I열
+                    sales_qty_col_for_trend = None
+                    if len(df.columns) > i_column_index_for_trend:
+                        sales_qty_col_for_trend = df.columns[i_column_index_for_trend]
+
+                    if sales_qty_col_for_trend is not None:
+                        sales_qty_weekly = pd.to_numeric(df[sales_qty_col_for_trend], errors='coerce')
+                        if sales_qty_weekly.notna().any():
+                            weekly_data = df.assign(_sales_qty=sales_qty_weekly).groupby(['주차', '주차_한글'])['_sales_qty'].sum().reset_index(name='건수')
+                        else:
+                            weekly_data = df.groupby(['주차', '주차_한글']).size().reset_index(name='건수')
+                    else:
+                        weekly_data = df.groupby(['주차', '주차_한글']).size().reset_index(name='건수')
                     weekly_data = weekly_data.sort_values('주차')
                     
                     # 매출이익금이 있으면 함께 표시
@@ -1766,7 +1818,14 @@ if uploaded_file is not None:
                 
                 with col2:
                     # 일별 총 판매수량과 매출이익금 통합 그래프
-                    daily_data = df.groupby('일').size().reset_index(name='건수')
+                    if sales_qty_col_for_trend is not None:
+                        sales_qty_daily = pd.to_numeric(df[sales_qty_col_for_trend], errors='coerce')
+                        if sales_qty_daily.notna().any():
+                            daily_data = df.assign(_sales_qty=sales_qty_daily).groupby('일')['_sales_qty'].sum().reset_index(name='건수')
+                        else:
+                            daily_data = df.groupby('일').size().reset_index(name='건수')
+                    else:
+                        daily_data = df.groupby('일').size().reset_index(name='건수')
                     
                     # 매출이익금이 있으면 함께 표시
                     if amount_col and amount_col in df.columns:
@@ -2343,7 +2402,25 @@ if uploaded_file is not None:
                         st.markdown(f"#### 📊 {part_name} 플랫폼별 판매수량 및 매출이익금 분석")
                         
                         # 플랫폼별 판매수량 집계
-                        platform_qty = df_part.groupby(category_col).size().sort_values(ascending=False).head(10)
+                        i_column_index_for_platform = 8  # I열
+                        sales_qty_col_for_platform = None
+                        if len(df_part.columns) > i_column_index_for_platform:
+                            sales_qty_col_for_platform = df_part.columns[i_column_index_for_platform]
+
+                        if sales_qty_col_for_platform is not None:
+                            sales_qty_platform = pd.to_numeric(df_part[sales_qty_col_for_platform], errors='coerce')
+                            if sales_qty_platform.notna().any():
+                                platform_qty = (
+                                    df_part.assign(_sales_qty=sales_qty_platform)
+                                    .groupby(category_col)['_sales_qty']
+                                    .sum()
+                                    .sort_values(ascending=False)
+                                    .head(10)
+                                )
+                            else:
+                                platform_qty = df_part.groupby(category_col).size().sort_values(ascending=False).head(10)
+                        else:
+                            platform_qty = df_part.groupby(category_col).size().sort_values(ascending=False).head(10)
                         
                         # 플랫폼별 매출이익금 집계
                         if amount_col and amount_col in df_part.columns:
@@ -2403,7 +2480,7 @@ if uploaded_file is not None:
                                         mode='lines+markers',
                                         marker=dict(size=10, color='#87CEEB'),
                                         line=dict(width=3, color='#87CEEB'),
-                                        hovertemplate='<b>%{x}</b><br>판매수량: %{y}건<extra></extra>'
+                                        hovertemplate='<b>%{x}</b><br>판매수량: %{y:,.0f}개<extra></extra>'
                                     ),
                                     secondary_y=True
                                 )
@@ -2440,7 +2517,7 @@ if uploaded_file is not None:
                                     range=yaxis_range  # Y축 범위 설정
                                 )
                                 fig_combined.update_yaxes(
-                                    title_text="판매수량 (건)",
+                                    title_text="판매수량 (개)",
                                     secondary_y=True,
                                     showgrid=False,  # 오른쪽 Y축은 그리드 라인 제거
                                     showticklabels=False,  # 보조 Y축 눈금선 제거
@@ -2457,13 +2534,13 @@ if uploaded_file is not None:
                                 x=platform_qty.index,
                                 y=platform_qty.values,
                                 title=f'{part_name} {category_col}별 판매수량 (상위 10개)',
-                                labels={'x': category_col, 'y': '판매수량 (건)'},
+                                labels={'x': category_col, 'y': '판매수량 (개)'},
                                 color=platform_qty.values,
                                 color_continuous_scale='Blues'
                             )
                             fig_qty.update_layout(
                                 xaxis_title=category_col,
-                                yaxis_title="판매수량 (건)",
+                                yaxis_title="판매수량 (개)",
                                 showlegend=False
                             )
                             st.plotly_chart(fig_qty, use_container_width=True)
