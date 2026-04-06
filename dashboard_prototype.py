@@ -383,6 +383,12 @@ if uploaded_file is not None:
         
         df = pd.read_excel(xls, sheet_name=selected_sheet)
         is_raw_selected_sheet = 'raw' in selected_sheet.lower()
+        # 예외 규칙: "2026년 3월 raw" 시트 데이터는 실제 날짜/주문월이 4월이어도 3월로 집계
+        force_march_for_2026_march_raw = (
+            is_raw_selected_sheet
+            and ('2026' in selected_sheet)
+            and ('3월' in selected_sheet)
+        )
         
         # 선택된 시트에서 월 정보 추출
         selected_month = None
@@ -440,6 +446,10 @@ if uploaded_file is not None:
                         df['주문월'] = order_month_series
                         if is_raw_selected_sheet:
                             df['월'] = order_month_series
+                
+                # 예외 적용: 2026년 3월 raw는 모든 행을 3월로 강제
+                if force_march_for_2026_march_raw:
+                    df['월'] = 3
                 
                 # 선택된 월 데이터만 필터링 (11월 또는 12월)
                 if '월' in df.columns and selected_month is not None:
