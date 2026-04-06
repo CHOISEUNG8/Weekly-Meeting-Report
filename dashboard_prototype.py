@@ -1088,10 +1088,12 @@ if uploaded_file is not None:
                 df[profit_col] = pd.to_numeric(df[profit_col], errors='coerce')
             total_profit = df[profit_col].sum()
         
-        # 이익률 계산: 1 - (K열 합계 / J열 합계)
-        if total_revenue is not None and total_revenue > 0 and total_cost is not None:
-            cost_ratio = total_cost / total_revenue
-            profit_rate = (1 - cost_ratio) * 100  # 백분율로 변환
+        # 이익률(GP%): 매출총이익(N열 합계) ÷ 총 매출(J열 합계) — GP 금액과 동일 기준
+        if total_revenue is not None and total_revenue > 0:
+            if total_profit is not None:
+                profit_rate = (total_profit / total_revenue) * 100
+            elif total_cost is not None:
+                profit_rate = ((total_revenue - total_cost) / total_revenue) * 100
         
         # KPI 표시
         col_kpi1, col_kpi2 = st.columns(2)
