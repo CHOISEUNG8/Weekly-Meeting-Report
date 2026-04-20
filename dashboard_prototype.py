@@ -943,14 +943,6 @@ if uploaded_file is not None:
                     part1_achieved = total_amount * (part1_ratio / 100)
                     part2_achieved = total_amount * ((100 - part1_ratio) / 100)
         
-        # 디버깅 정보 (기본적으로 숨김)
-        with st.expander("🔍 파트별 요약 보기", expanded=False):
-            st.write(f"**1파트 달성 금액:** {part1_achieved:,.0f}원")
-            st.write(f"**2파트 달성 금액:** {part2_achieved:,.0f}원")
-            if part_col:
-                st.write(f"**1파트 데이터 건수:** {part1_count}건")
-                st.write(f"**2파트 데이터 건수:** {part2_count}건")
-        
         # 선택된 월 총 매출이익금 표시 (1파트 + 2파트 합계)
         if amount_col is not None and selected_month is not None:
             total_profit = part1_achieved + part2_achieved
@@ -968,72 +960,82 @@ if uploaded_file is not None:
             with col_info2:
                 st.info(f"💰 {selected_month}월 총 매출이익금 {total_profit:,.0f}원")
         
-        # 달성율 계산
-        achievement_rate_part1 = (part1_achieved / target_part1 * 100) if target_part1 > 0 else 0
-        achievement_rate_part2 = (part2_achieved / target_part2 * 100) if target_part2 > 0 else 0
-        
-        # 달성율 표시
-        col_part1, col_part2, col_total = st.columns(3)
-        
-        with col_part1:
-            delta_part1 = part1_achieved - target_part1
-            st.metric(
-                "1파트 달성율",
-                f"{achievement_rate_part1:.1f}%",
-                delta=f"{delta_part1:,.0f}원",
-                help=f"목표: {target_part1:,}원, 달성: {part1_achieved:,.0f}원"
-            )
-            st.caption(f"목표: {target_part1:,}원")
-            st.caption(f"달성: {part1_achieved:,.0f}원")
-        
-        with col_part2:
-            delta_part2 = part2_achieved - target_part2
-            st.metric(
-                "2파트 달성율",
-                f"{achievement_rate_part2:.1f}%",
-                delta=f"{delta_part2:,.0f}원",
-                help=f"목표: {target_part2:,}원, 달성: {part2_achieved:,.0f}원"
-            )
-            st.caption(f"목표: {target_part2:,}원")
-            st.caption(f"달성: {part2_achieved:,.0f}원")
-        
-        with col_total:
-            total_target = target_part1 + target_part2
-            total_achieved = part1_achieved + part2_achieved
-            total_rate = (total_achieved / total_target * 100) if total_target > 0 else 0
-            delta_total = total_achieved - total_target
-            st.metric(
-                "전체 달성율",
-                f"{total_rate:.1f}%",
-                delta=f"{delta_total:,.0f}원",
-                help=f"목표: {total_target:,}원, 달성: {total_achieved:,.0f}원"
-            )
-            st.caption(f"목표: {total_target:,}원")
-            st.caption(f"달성: {total_achieved:,.0f}원")
-        
-        # 달성율 시각화 (프로그레스 바)
+        # 달성율 계산 (메인은 월별 전체 합산)
+        total_target = target_part1 + target_part2
+        total_achieved = part1_achieved + part2_achieved
+        total_rate = (total_achieved / total_target * 100) if total_target > 0 else 0
+        delta_total = total_achieved - total_target
+
+        # 담당자별 상세 보기용 집계 (P열 담당자명 매칭, 월 전체 목표를 균등 3분할하여 달성율 계산)
+        DETAIL_MANAGER_NAMES = ("김영희", "박성호", "장연주")
+        manager_detail_stats = []
+        if manager_col_for_part is not None and amount_col is not None:
+            mgr_series = df_target[manager_col_for_part]
+            n_managers = len(DETAIL_MANAGER_NAMES)
+            target_each_manager = (total_target / n_managers) if total_target > 0 and n_managers else 0.0
+            for nm in DETAIL_MANAGER_NAMES:
+                mask_m = mgr_series.apply(
+                    lambda v, name=nm: (not pd.isna(v)) and (name in str(v).strip())
+                )
+                ach = float(df_target.loc[mask_m, amount_col].fillna(0).sum())
+                cnt = int(mask_m.sum())
+                rate_m = (ach / target_each_manager * 100) if target_each_manager > 0 else 0.0
+                manager_detail_stats.append(
+                    {
+                        "name": nm,
+                        "achieved": ach,
+                        "count": cnt,
+                        "target": target_each_manager,
+                        "rate": rate_m,
+                    }
+                )
+
+        # 월별 전체 달성율 (1·2파트 목표·실적 합산)
+        st.metric(
+            "전체 달성율",
+            f"{total_rate:.1f}%",
+            delta=f"{delta_total:,.0f}원",
+            help=f"목표(1+2파트 합): {total_target:,}원, 달성: {total_achieved:,.0f}원",
+        )
+        st.caption(f"목표: {total_target:,}원  ·  달성: {total_achieved:,.0f}원")
+
+        with st.expander("🔍 담당자별 상세 보기", expanded=False):
+            if manager_col_for_part is None:
+                st.warning("담당자 열(P열)을 찾을 수 없어 담당자별 집계를 표시할 수 없습니다.")
+            elif amount_col is None:
+                st.warning("금액 열(N열)을 찾을 수 없어 담당자별 집계를 표시할 수 없습니다.")
+            else:
+                st.caption(
+                    "위 전체 달성율과 동일한 월·데이터 기준입니다. "
+                    "담당자별 목표 금액은 해당 월 전체 목표(1·2파트 합)를 "
+                    f"담당자 {len(DETAIL_MANAGER_NAMES)}명에 균등 배분한 값입니다."
+                )
+                for row in manager_detail_stats:
+                    st.write(f"**{row['name']} 달성 금액:** {row['achieved']:,.0f}원")
+                for row in manager_detail_stats:
+                    st.write(f"**{row['name']} 데이터 건수:** {row['count']}건")
+                st.divider()
+                c1, c2, c3 = st.columns(3)
+                cols_detail = (c1, c2, c3)
+                for i, row in enumerate(manager_detail_stats):
+                    with cols_detail[i]:
+                        st.metric(
+                            f"{row['name']} 달성율",
+                            f"{row['rate']:.1f}%",
+                            delta=f"{row['achieved'] - row['target']:,.0f}원",
+                            help=f"목표(균등분): {row['target']:,.0f}원, 달성: {row['achieved']:,.0f}원",
+                        )
+                        st.caption(f"목표 {row['target']:,.0f}원 / 달성 {row['achieved']:,.0f}원")
+
+        # 달성율 시각화 (프로그레스 바) — 전체 기준
         st.markdown("#### 달성율 진행 상황")
-        progress_col1, progress_col2 = st.columns(2)
-        
-        with progress_col1:
-            st.markdown("**1파트**")
-            st.progress(min(achievement_rate_part1 / 100, 1.0))
-            if achievement_rate_part1 >= 100:
-                st.success(f"✅ 목표 달성! ({achievement_rate_part1:.1f}%)")
-            elif achievement_rate_part1 >= 80:
-                st.warning(f"⚠️ 목표 근접 ({achievement_rate_part1:.1f}%)")
-            else:
-                st.info(f"📊 진행 중 ({achievement_rate_part1:.1f}%)")
-        
-        with progress_col2:
-            st.markdown("**2파트**")
-            st.progress(min(achievement_rate_part2 / 100, 1.0))
-            if achievement_rate_part2 >= 100:
-                st.success(f"✅ 목표 달성! ({achievement_rate_part2:.1f}%)")
-            elif achievement_rate_part2 >= 80:
-                st.warning(f"⚠️ 목표 근접 ({achievement_rate_part2:.1f}%)")
-            else:
-                st.info(f"📊 진행 중 ({achievement_rate_part2:.1f}%)")
+        st.progress(min(total_rate / 100, 1.0))
+        if total_rate >= 100:
+            st.success(f"✅ 목표 달성! ({total_rate:.1f}%)")
+        elif total_rate >= 80:
+            st.warning(f"⚠️ 목표 근접 ({total_rate:.1f}%)")
+        else:
+            st.info(f"📊 진행 중 ({total_rate:.1f}%)")
         
         st.markdown("---")
         
@@ -1999,6 +2001,16 @@ if uploaded_file is not None:
                 revenue_col: 'sum',  # 매출 (J열)
             }).reset_index()
             platform_summary.columns = ['플랫폼', '매출']
+
+            # 이익금(=매출이익금/N열) 합계 추가
+            if amount_col is not None:
+                profit_col_platform = amount_col
+                if df[profit_col_platform].dtype == 'object':
+                    df[profit_col_platform] = pd.to_numeric(df[profit_col_platform], errors='coerce')
+                platform_profit_sum = df.groupby(platform_col)[profit_col_platform].sum().reset_index()
+                platform_profit_sum.columns = ['플랫폼', '이익금']
+                platform_summary = platform_summary.merge(platform_profit_sum, on='플랫폼', how='left')
+                platform_summary['이익금'] = pd.to_numeric(platform_summary['이익금'], errors='coerce').fillna(0)
             
             # I열 합계 추가 (최다 판매 판단용)
             if sales_qty_col is not None:
@@ -2057,6 +2069,8 @@ if uploaded_file is not None:
             # 표시용 데이터 준비
             platform_display = platform_summary.copy()
             platform_display['매출'] = platform_display['매출'].apply(lambda x: f"{x:,.0f}원" if pd.notna(x) else "0원")
+            if '이익금' in platform_display.columns:
+                platform_display['이익금'] = platform_display['이익금'].apply(lambda x: f"{x:,.0f}원" if pd.notna(x) else "0원")
             if '판매수량' in platform_display.columns:
                 platform_display['판매수량'] = platform_display['판매수량'].apply(lambda x: f"{x:,.0f}" if pd.notna(x) else "0")
             if '이익률' in platform_display.columns:
@@ -2073,6 +2087,8 @@ if uploaded_file is not None:
             
             # 표시 컬럼 선택
             display_cols = ['플랫폼', '매출']
+            if '이익금' in platform_display.columns:
+                display_cols.append('이익금')
             if '이익률' in platform_display.columns:
                 display_cols.append('이익률')
             if '판매수량' in platform_display.columns:
@@ -2094,6 +2110,11 @@ if uploaded_file is not None:
                     # 문자열인 경우 숫자로 변환 (% 제거)
                     platform_summary['이익률'] = platform_summary['이익률'].astype(str).str.replace('%', '').str.replace(',', '').str.replace(' ', '')
                 platform_summary['이익률'] = pd.to_numeric(platform_summary['이익률'], errors='coerce').fillna(0)
+
+            if '이익금' in platform_summary.columns:
+                if platform_summary['이익금'].dtype == 'object' or str(platform_summary['이익금'].dtype).startswith('string'):
+                    platform_summary['이익금'] = platform_summary['이익금'].astype(str).str.replace('원', '').str.replace(',', '').str.replace(' ', '')
+                platform_summary['이익금'] = pd.to_numeric(platform_summary['이익금'], errors='coerce').fillna(0)
             
             if '매출' in platform_summary.columns:
                 # 매출도 문자열일 수 있으므로 처리
@@ -2103,7 +2124,7 @@ if uploaded_file is not None:
                 platform_summary['매출'] = pd.to_numeric(platform_summary['매출'], errors='coerce').fillna(0)
             
             # 정렬 옵션
-            sort_option = st.selectbox("정렬 기준", ['매출 높은 순', '이익률 높은 순', '판매수량 높은 순'], key='platform_sort')
+            sort_option = st.selectbox("정렬 기준", ['매출 높은 순', '이익금 높은 순', '판매수량 높은순'], key='platform_sort')
             
             # 모든 정렬 옵션에 대해 동일한 방식으로 처리 (nlargest 사용)
             platform_summary_sorted = platform_summary.copy()
@@ -2113,12 +2134,10 @@ if uploaded_file is not None:
                 platform_summary_sorted['매출'] = pd.to_numeric(platform_summary_sorted['매출'], errors='coerce').fillna(0)
                 # nlargest를 사용하여 숫자 기준 정렬 보장
                 platform_summary_sorted = platform_summary_sorted.nlargest(len(platform_summary_sorted), '매출').reset_index(drop=True)
-            elif sort_option == '이익률 높은 순' and '이익률' in platform_summary_sorted.columns:
-                # 이익률을 숫자형으로 확실히 변환
-                platform_summary_sorted['이익률'] = pd.to_numeric(platform_summary_sorted['이익률'], errors='coerce').fillna(0)
-                # nlargest를 사용하여 숫자 기준 정렬 보장
-                platform_summary_sorted = platform_summary_sorted.nlargest(len(platform_summary_sorted), '이익률').reset_index(drop=True)
-            elif sort_option == '판매수량 높은 순' and '판매수량' in platform_summary_sorted.columns:
+            elif sort_option == '이익금 높은 순' and '이익금' in platform_summary_sorted.columns:
+                platform_summary_sorted['이익금'] = pd.to_numeric(platform_summary_sorted['이익금'], errors='coerce').fillna(0)
+                platform_summary_sorted = platform_summary_sorted.nlargest(len(platform_summary_sorted), '이익금').reset_index(drop=True)
+            elif sort_option == '판매수량 높은순' and '판매수량' in platform_summary_sorted.columns:
                 # 판매수량을 숫자형으로 확실히 변환 (매출/이익률과 동일한 방식)
                 # 문자열인 경우 숫자로 변환
                 if platform_summary_sorted['판매수량'].dtype == 'object' or str(platform_summary_sorted['판매수량'].dtype).startswith('string'):
@@ -2160,6 +2179,17 @@ if uploaded_file is not None:
                 else:
                     매출_formatted.append("0원")
             platform_display_sorted['매출'] = 매출_formatted
+
+            # 이익금을 문자열로 변환 (매출과 동일 포맷: 천단위 콤마 + 원)
+            if '이익금' in platform_display_sorted.columns:
+                이익금_formatted = []
+                for idx in platform_display_sorted.index:
+                    val = platform_display_sorted.loc[idx, '이익금']
+                    if pd.notna(val) and val != 0:
+                        이익금_formatted.append(f"{float(val):,.0f}원")
+                    else:
+                        이익금_formatted.append("0원")
+                platform_display_sorted['이익금'] = 이익금_formatted
             
             # 판매수량을 문자열로 변환 (숫자형에서 직접 변환하여 순서 유지)
             if '판매수량' in platform_display_sorted.columns:
@@ -2168,7 +2198,7 @@ if uploaded_file is not None:
                     platform_display_sorted['판매수량'] = pd.to_numeric(platform_display_sorted['판매수량'], errors='coerce').fillna(0)
                 
                 # 판매수량 정렬인 경우 정렬 순서를 명시적으로 보존
-                if sort_option == '판매수량 높은 순':
+                if sort_option == '판매수량 높은순':
                     # 판매수량 값들을 숫자형으로 변환하여 정렬 순서 확인
                     sales_qty_numeric = pd.to_numeric(platform_display_sorted['판매수량'], errors='coerce').fillna(0).values
                     # 내림차순인지 확인
@@ -2224,7 +2254,7 @@ if uploaded_file is not None:
             display_data = display_data.reset_index(drop=True)
             
             # 판매수량 정렬인 경우 정렬 순서를 명시적으로 보존
-            if sort_option == '판매수량 높은 순' and '판매수량' in display_data.columns:
+            if sort_option == '판매수량 높은순' and '판매수량' in display_data.columns:
                 # 정렬 순서를 보존하기 위해 순서 번호 컬럼 추가
                 display_data['_display_order'] = range(len(display_data))
                 # 순서 번호로 정렬하여 정렬 순서 보장 (이미 정렬되어 있지만 확실히 하기 위해)
@@ -2302,12 +2332,16 @@ if uploaded_file is not None:
                     other_mall_profit_2part = 0.0
                     group_note = "※ 파트 컬럼을 찾지 못해 ‘나머지 몰’은 전체 기준으로 집계했습니다."
 
+                closed_mall_profit = (
+                    (float(other_mall_profit_1part) if pd.notna(other_mall_profit_1part) else 0.0)
+                    + (float(other_mall_profit_2part) if pd.notna(other_mall_profit_2part) else 0.0)
+                )
+
                 compare_df = pd.DataFrame({
-                    '구분': ['삼성(베네포유+카드몰)', '타 폐쇄몰', '2파트 폐쇄몰'],
+                    '구분': ['삼성(베네포유+카드몰)', '폐쇄몰'],
                     '매출이익금': [
                         float(samsung_profit) if pd.notna(samsung_profit) else 0.0,
-                        float(other_mall_profit_1part) if pd.notna(other_mall_profit_1part) else 0.0,
-                        float(other_mall_profit_2part) if pd.notna(other_mall_profit_2part) else 0.0
+                        closed_mall_profit,
                     ]
                 })
 
@@ -2316,12 +2350,12 @@ if uploaded_file is not None:
                     x='구분',
                     y='매출이익금',
                     text='매출이익금',
-                    title=f'{month_label} 매출이익금 비교 (삼성 vs 타 폐쇄몰 vs 2파트 폐쇄몰)',
+                    title=f'{month_label} 매출이익금 비교 (삼성 vs 폐쇄몰)',
                     color='구분',
                     color_discrete_map={
-                        '삼성(베네포유+카드몰)': '#87CEEB',  # 파스텔 블루
-                        '타 폐쇄몰': '#A5D6A7',              # 파스텔 그린
-                        '2파트 폐쇄몰': '#FFB6C1'             # 파스텔 핑크
+                        # 채도를 낮춘 부드러운 파스텔 톤
+                        '삼성(베네포유+카드몰)': '#A7C7E7',  # 소프트 파스텔 블루
+                        '폐쇄몰': '#BFE3C0',                 # 소프트 파스텔 그린
                     }
                 )
                 fig_profit_compare.update_traces(
@@ -3227,10 +3261,10 @@ if uploaded_file is not None:
         #         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         #     )
         
-        # 메모장 기능 추가 (파트별로 구분, 주차별 저장)
+        # 메모장 기능 추가 (월/주차별 저장)
         st.markdown('<span id="section_plans" class="anchor"></span>', unsafe_allow_html=True)
         st.markdown("---")
-        st.markdown(f"#### 📝 {month_label} 계획 (파트별)")
+        st.markdown(f"#### 📝 {month_label} 계획")
         
         # 주차를 올바른 순서로 정렬하는 함수
         def sort_weeks_korean_for_part(weeks):
@@ -3268,58 +3302,45 @@ if uploaded_file is not None:
                 selected_week_part = st.selectbox("주차 선택", unique_weeks, key=part_week_select_key, index=default_index)
                 
                 # 주차 변경 감지 및 이전 주차 데이터 저장
-                last_week_key = f"last_selected_week_part_{month_label}"
+                last_week_key = f"last_selected_week_plan_{month_label}"
                 if last_week_key in st.session_state and st.session_state[last_week_key] != selected_week_part:
-                    # 주차가 변경되었으므로 이전 주차의 데이터를 파일에 저장
                     previous_week = st.session_state[last_week_key]
-                    previous_memo_key_part1 = f"memo_{month_label}_{previous_week}_part1"
-                    previous_memo_key_part2 = f"memo_{month_label}_{previous_week}_part2"
-                    previous_input_key_part1 = f"memo_input_{month_label}_{previous_week}_part1"
-                    previous_input_key_part2 = f"memo_input_{month_label}_{previous_week}_part2"
-                    
-                    # 이전 주차의 1파트 메모 저장 (입력창 내용 우선 확인)
-                    previous_memo_part1 = ""
-                    if previous_input_key_part1 in st.session_state:
-                        # 입력창의 내용이 있으면 우선 사용
-                        previous_memo_part1 = st.session_state[previous_input_key_part1]
-                    elif previous_memo_key_part1 in st.session_state:
-                        # 입력창 내용이 없으면 session_state 확인
-                        previous_memo_part1 = st.session_state[previous_memo_key_part1]
-                    
-                    # 빈 값이 아닐 때만 저장
-                    if previous_memo_part1 and previous_memo_part1.strip():
-                        save_memo_to_file(previous_memo_key_part1, previous_memo_part1)
-                    
-                    # 이전 주차의 2파트 메모 저장 (입력창 내용 우선 확인)
-                    previous_memo_part2 = ""
-                    if previous_input_key_part2 in st.session_state:
-                        # 입력창의 내용이 있으면 우선 사용
-                        previous_memo_part2 = st.session_state[previous_input_key_part2]
-                    elif previous_memo_key_part2 in st.session_state:
-                        # 입력창 내용이 없으면 session_state 확인
-                        previous_memo_part2 = st.session_state[previous_memo_key_part2]
-                    
-                    # 빈 값이 아닐 때만 저장
-                    if previous_memo_part2 and previous_memo_part2.strip():
-                        save_memo_to_file(previous_memo_key_part2, previous_memo_part2)
-                
-                # 파트별 메모 탭 생성
-                part_tabs = st.tabs(["1파트", "2파트"])
-                
-                # 1파트 메모
-                with part_tabs[0]:
-                    memo_key_part1 = f"memo_{month_label}_{selected_week_part}_part1"
-                    
-                    # 주차별로 독립적인 session_state 키 사용 (주차가 변경되면 항상 파일에서 불러오기)
-                    current_week_state_key_part1 = f"current_week_{memo_key_part1}"
-                    if current_week_state_key_part1 not in st.session_state or st.session_state.get(f"last_selected_week_part_{month_label}") != selected_week_part:
-                        # 주차가 변경되었거나 처음 로드하는 경우 파일에서 불러오기
-                        loaded_memo = load_memo_from_file(memo_key_part1)
-                        if loaded_memo:
-                            st.session_state[memo_key_part1] = loaded_memo
+                    prev_memo_key = f"memo_{month_label}_{previous_week}"
+                    prev_input_key = f"memo_input_{month_label}_{previous_week}"
+                    prev_text = ""
+                    if prev_input_key in st.session_state:
+                        prev_text = st.session_state[prev_input_key]
+                    elif prev_memo_key in st.session_state:
+                        prev_text = st.session_state[prev_memo_key]
+                    if prev_text and prev_text.strip():
+                        save_memo_to_file(prev_memo_key, prev_text)
+
+                memo_key = f"memo_{month_label}_{selected_week_part}"
+
+                # 주차별로 독립적인 session_state 키 사용 (주차가 변경되면 항상 파일에서 불러오기)
+                current_week_state_key = f"current_week_{memo_key}"
+                if current_week_state_key not in st.session_state or st.session_state.get(last_week_key) != selected_week_part:
+                    loaded_memo = load_memo_from_file(memo_key)
+                    if loaded_memo:
+                        st.session_state[memo_key] = loaded_memo
+                    else:
+                        # 하위 호환: 기존 파트별 메모가 있으면 합쳐서 초기값으로 사용
+                        legacy_part1 = load_memo_from_file(f"{memo_key}_part1")
+                        legacy_part2 = load_memo_from_file(f"{memo_key}_part2")
+
+                        merged = ""
+                        if legacy_part1 and legacy_part1.strip():
+                            merged += f"[1파트]\n{legacy_part1.strip()}\n\n"
+                        if legacy_part2 and legacy_part2.strip():
+                            merged += f"[2파트]\n{legacy_part2.strip()}\n"
+                        merged = merged.strip()
+
+                        if merged:
+                            st.session_state[memo_key] = merged
+                            save_memo_to_file(memo_key, merged)
                         elif selected_month == 12 and selected_week_part == unique_weeks[0]:
-                            # 12월 첫째주 계획 메모 기본값 설정 (1파트)
-                            default_memo_part1 = """★ 업무 진행 현황
+                            # 12월 첫째주 기본값 (기존 1파트 기본 텍스트 유지)
+                            default_memo = """★ 업무 진행 현황
 
 * 교육 이수진행 (최승영 / 장지웅) 완료
 : 장지웅 프로는 추가로 교육필요한 인증서가 있어 추가 교육진행중
@@ -3385,116 +3406,66 @@ https://jasongroup.co.kr/
 엘슈퍼비젼
 https://elsupervision.com/default/
 """
-                            st.session_state[memo_key_part1] = default_memo_part1
-                            save_memo_to_file(memo_key_part1, default_memo_part1)
+                            st.session_state[memo_key] = default_memo
+                            save_memo_to_file(memo_key, default_memo)
                         else:
-                            # 파일에서 불러온 값이 없고 기본값도 없으면 session_state에 빈 값으로 설정하지 않음
-                            # 대신 빈 문자열로 초기화하되, 나중에 저장할 때는 빈 값 저장 방지 로직이 작동함
-                            if memo_key_part1 not in st.session_state:
-                                st.session_state[memo_key_part1] = ""
-                        st.session_state[current_week_state_key_part1] = True
-                        st.session_state[f"last_selected_week_part_{month_label}"] = selected_week_part
-                    
-                    # 1파트 메모 입력
-                    memo_text_part1 = st.text_area(
-                        f"1파트 메모를 입력하세요 ({selected_week_part})",
-                        value=st.session_state.get(memo_key_part1, ""),
-                        height=200,
-                        placeholder=f"1파트 메모를 작성하세요 ({selected_week_part}).\n\n💡 팁: '저장' 버튼을 눌러야 데이터가 보존됩니다.",
-                        key=f"memo_input_{month_label}_{selected_week_part}_part1"
-                    )
-                    
-                    # 명시적 저장 버튼
-                    if st.button(f"💾 {selected_week_part} 1파트 계획 저장", key=f"save_btn_part1_{selected_week_part}"):
-                        if memo_text_part1 and memo_text_part1.strip():
-                            st.session_state[memo_key_part1] = memo_text_part1
-                            save_memo_to_file(memo_key_part1, memo_text_part1)
-                            st.success(f"✅ {selected_week_part} 1파트 계획이 저장되었습니다.")
-                            time.sleep(0.5)
-                            st.rerun()
-                        else:
-                            st.warning("⚠️ 저장할 내용이 없습니다.")
-                    
-                    # 저장된 1파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
-                    if st.session_state.get(memo_key_part1, ""):
-                        with st.expander(f"📋 저장된 {selected_week_part} 1파트 메모 보기", expanded=False):
-                            # 입력 영역과 동일한 스타일로 표시 (일반 폰트, 줄바꿈 보존)
-                            memo_content = html.escape(st.session_state[memo_key_part1])
-                            # 줄바꿈을 <br>로 변환
-                            memo_content = memo_content.replace('\n', '<br>')
-                            # 입력 영역과 동일한 스타일 적용
-                            memo_display_part1 = f"<div style='white-space: pre-wrap; font-family: inherit; line-height: 1.5; padding: 0.5rem;'>{memo_content}</div>"
-                            st.markdown(memo_display_part1, unsafe_allow_html=True)
-                
-                # 2파트 메모
-                with part_tabs[1]:
-                    memo_key_part2 = f"memo_{month_label}_{selected_week_part}_part2"
-                    
-                    # 주차별로 독립적인 session_state 키 사용 (주차가 변경되면 항상 파일에서 불러오기)
-                    current_week_state_key_part2 = f"current_week_{memo_key_part2}"
-                    if current_week_state_key_part2 not in st.session_state or st.session_state.get(f"last_selected_week_part_{month_label}") != selected_week_part:
-                        # 주차가 변경되었거나 처음 로드하는 경우 파일에서 불러오기
-                        loaded_memo = load_memo_from_file(memo_key_part2)
-                        if loaded_memo:
-                            st.session_state[memo_key_part2] = loaded_memo
-                        else:
-                            # 파일에서 불러온 값이 없으면 session_state에 빈 값으로 설정하지 않음
-                            # 대신 빈 문자열로 초기화하되, 나중에 저장할 때는 빈 값 저장 방지 로직이 작동함
-                            if memo_key_part2 not in st.session_state:
-                                st.session_state[memo_key_part2] = ""
-                        st.session_state[current_week_state_key_part2] = True
-                        st.session_state[f"last_selected_week_part_{month_label}"] = selected_week_part
-                    
-                    # 2파트 메모 입력
-                    memo_text_part2 = st.text_area(
-                        f"2파트 메모를 입력하세요 ({selected_week_part})",
-                        value=st.session_state.get(memo_key_part2, ""),
-                        height=200,
-                        placeholder=f"2파트 메모를 작성하세요 ({selected_week_part}).\n\n💡 팁: '저장' 버튼을 눌러야 데이터가 보존됩니다.",
-                        key=f"memo_input_{month_label}_{selected_week_part}_part2"
-                    )
-                    
-                    # 명시적 저장 버튼
-                    if st.button(f"💾 {selected_week_part} 2파트 계획 저장", key=f"save_btn_part2_{selected_week_part}"):
-                        if memo_text_part2 and memo_text_part2.strip():
-                            st.session_state[memo_key_part2] = memo_text_part2
-                            save_memo_to_file(memo_key_part2, memo_text_part2)
-                            st.success(f"✅ {selected_week_part} 2파트 계획이 저장되었습니다.")
-                            time.sleep(0.5)
-                            st.rerun()
-                        else:
-                            st.warning("⚠️ 저장할 내용이 없습니다.")
-                    
-                    # 저장된 2파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
-                    if st.session_state.get(memo_key_part2, ""):
-                        with st.expander(f"📋 저장된 {selected_week_part} 2파트 메모 보기", expanded=False):
-                            # 입력 영역과 동일한 스타일로 표시 (일반 폰트, 줄바꿈 보존)
-                            memo_content = html.escape(st.session_state[memo_key_part2])
-                            # 줄바꿈을 <br>로 변환
-                            memo_content = memo_content.replace('\n', '<br>')
-                            # 입력 영역과 동일한 스타일 적용
-                            memo_display_part2 = f"<div style='white-space: pre-wrap; font-family: inherit; line-height: 1.5; padding: 0.5rem;'>{memo_content}</div>"
-                            st.markdown(memo_display_part2, unsafe_allow_html=True)
+                            if memo_key not in st.session_state:
+                                st.session_state[memo_key] = ""
+
+                    st.session_state[current_week_state_key] = True
+                    st.session_state[last_week_key] = selected_week_part
+
+                memo_text = st.text_area(
+                    f"메모를 입력하세요 ({selected_week_part})",
+                    value=st.session_state.get(memo_key, ""),
+                    height=220,
+                    placeholder=f"{month_label} 계획 메모를 작성하세요 ({selected_week_part}).\n\n💡 팁: '저장' 버튼을 눌러야 데이터가 보존됩니다.",
+                    key=f"memo_input_{month_label}_{selected_week_part}"
+                )
+
+                if st.button(f"💾 {selected_week_part} 계획 저장", key=f"save_btn_plan_{selected_week_part}"):
+                    if memo_text and memo_text.strip():
+                        st.session_state[memo_key] = memo_text
+                        save_memo_to_file(memo_key, memo_text)
+                        st.success(f"✅ {selected_week_part} 계획이 저장되었습니다.")
+                        time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ 저장할 내용이 없습니다.")
+
+                if st.session_state.get(memo_key, ""):
+                    with st.expander(f"📋 저장된 {selected_week_part} 메모 보기", expanded=False):
+                        memo_content = html.escape(st.session_state[memo_key])
+                        memo_content = memo_content.replace('\n', '<br>')
+                        memo_display = f"<div style='white-space: pre-wrap; font-family: inherit; line-height: 1.5; padding: 0.5rem;'>{memo_content}</div>"
+                        st.markdown(memo_display, unsafe_allow_html=True)
             else:
                 st.info("주차 정보를 찾을 수 없습니다.")
         else:
             # 주차 정보가 없는 경우 기존 방식으로 월별 저장 (하위 호환성 유지)
             st.info("⚠️ 주차 정보가 없어 월별로 저장됩니다. 날짜 정보가 포함된 데이터를 업로드하면 주차별로 저장됩니다.")
-            
-            # 파트별 메모 탭 생성
-            part_tabs = st.tabs(["1파트", "2파트"])
-            
-            # 1파트 메모
-            with part_tabs[0]:
-                memo_key_part1 = f"memo_{month_label}_part1"
-                # 파일에서 메모 불러오기
-                if memo_key_part1 not in st.session_state:
-                    loaded_memo = load_memo_from_file(memo_key_part1)
-                    if loaded_memo:
-                        st.session_state[memo_key_part1] = loaded_memo
+
+            memo_key = f"memo_{month_label}"
+            if memo_key not in st.session_state:
+                loaded_memo = load_memo_from_file(memo_key)
+                if loaded_memo:
+                    st.session_state[memo_key] = loaded_memo
+                else:
+                    # 하위 호환: 기존 파트별 메모가 있으면 합쳐서 초기값으로 사용
+                    legacy_part1 = load_memo_from_file(f"{memo_key}_part1")
+                    legacy_part2 = load_memo_from_file(f"{memo_key}_part2")
+                    merged = ""
+                    if legacy_part1 and legacy_part1.strip():
+                        merged += f"[1파트]\n{legacy_part1.strip()}\n\n"
+                    if legacy_part2 and legacy_part2.strip():
+                        merged += f"[2파트]\n{legacy_part2.strip()}\n"
+                    merged = merged.strip()
+                    if merged:
+                        st.session_state[memo_key] = merged
+                        save_memo_to_file(memo_key, merged)
                     elif selected_month == 12:
-                        # 12월 계획 메모 기본값 설정 (1파트)
-                        default_memo_part1 = """★ 업무 진행 현황
+                        # 12월 계획 메모 기본값 설정 (기존 1파트 기본 텍스트 유지)
+                        default_memo = """★ 업무 진행 현황
 
 * 교육 이수진행 (최승영 / 장지웅) 완료
 : 장지웅 프로는 추가로 교육필요한 인증서가 있어 추가 교육진행중
@@ -3560,83 +3531,35 @@ https://jasongroup.co.kr/
 엘슈퍼비젼
 https://elsupervision.com/default/
 """
-                        st.session_state[memo_key_part1] = default_memo_part1
-                        save_memo_to_file(memo_key_part1, default_memo_part1)
+                        st.session_state[memo_key] = default_memo
+                        save_memo_to_file(memo_key, default_memo)
                     else:
-                        st.session_state[memo_key_part1] = ""
-                
-                # 1파트 메모 입력
-                memo_text_part1 = st.text_area(
-                    "1파트 메모를 입력하세요",
-                    value=st.session_state.get(memo_key_part1, ""),
-                    height=200,
-                    placeholder="1파트 메모를 작성하세요.\n\n💡 팁: '저장' 버튼을 눌러야 데이터가 보존됩니다.",
-                    key=f"memo_input_{month_label}_part1"
-                )
-                
-                # 명시적 저장 버튼
-                if st.button("💾 1파트 계획 저장", key=f"save_btn_part1_no_week_{month_label}"):
-                    if memo_text_part1 and memo_text_part1.strip():
-                        st.session_state[memo_key_part1] = memo_text_part1
-                        save_memo_to_file(memo_key_part1, memo_text_part1)
-                        st.success("✅ 1파트 계획이 저장되었습니다.")
-                        time.sleep(0.5)
-                        st.rerun()
-                    else:
-                        st.warning("⚠️ 저장할 내용이 없습니다.")
-                
-                # 저장된 1파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
-                if st.session_state.get(memo_key_part1, ""):
-                    with st.expander("📋 저장된 1파트 메모 보기", expanded=False):
-                        # 입력 영역과 동일한 스타일로 표시 (일반 폰트, 줄바꿈 보존)
-                        memo_content = html.escape(st.session_state[memo_key_part1])
-                        # 줄바꿈을 <br>로 변환
-                        memo_content = memo_content.replace('\n', '<br>')
-                        # 입력 영역과 동일한 스타일 적용
-                        memo_display_part1 = f"<div style='white-space: pre-wrap; font-family: inherit; line-height: 1.5; padding: 0.5rem;'>{memo_content}</div>"
-                        st.markdown(memo_display_part1, unsafe_allow_html=True)
-            
-            # 2파트 메모
-            with part_tabs[1]:
-                memo_key_part2 = f"memo_{month_label}_part2"
-                # 파일에서 메모 불러오기
-                if memo_key_part2 not in st.session_state:
-                    loaded_memo = load_memo_from_file(memo_key_part2)
-                    if loaded_memo:
-                        st.session_state[memo_key_part2] = loaded_memo
-                    else:
-                        st.session_state[memo_key_part2] = ""
-                
-                # 2파트 메모 입력
-                memo_text_part2 = st.text_area(
-                    "2파트 메모를 입력하세요",
-                    value=st.session_state.get(memo_key_part2, ""),
-                    height=200,
-                    placeholder="2파트 메모를 작성하세요.\n\n💡 팁: '저장' 버튼을 눌러야 데이터가 보존됩니다.",
-                    key=f"memo_input_{month_label}_part2"
-                )
-                
-                # 명시적 저장 버튼
-                if st.button("💾 2파트 계획 저장", key=f"save_btn_part2_no_week_{month_label}"):
-                    if memo_text_part2 and memo_text_part2.strip():
-                        st.session_state[memo_key_part2] = memo_text_part2
-                        save_memo_to_file(memo_key_part2, memo_text_part2)
-                        st.success("✅ 2파트 계획이 저장되었습니다.")
-                        time.sleep(0.5)
-                        st.rerun()
-                    else:
-                        st.warning("⚠️ 저장할 내용이 없습니다.")
-                
-                # 저장된 2파트 메모 표시 (원본 포맷 보존, 입력 영역과 동일한 스타일)
-                if st.session_state.get(memo_key_part2, ""):
-                    with st.expander("📋 저장된 2파트 메모 보기", expanded=False):
-                        # 입력 영역과 동일한 스타일로 표시 (일반 폰트, 줄바꿈 보존)
-                        memo_content = html.escape(st.session_state[memo_key_part2])
-                        # 줄바꿈을 <br>로 변환
-                        memo_content = memo_content.replace('\n', '<br>')
-                        # 입력 영역과 동일한 스타일 적용
-                        memo_display_part2 = f"<div style='white-space: pre-wrap; font-family: inherit; line-height: 1.5; padding: 0.5rem;'>{memo_content}</div>"
-                        st.markdown(memo_display_part2, unsafe_allow_html=True)
+                        st.session_state[memo_key] = ""
+
+            memo_text = st.text_area(
+                "메모를 입력하세요",
+                value=st.session_state.get(memo_key, ""),
+                height=220,
+                placeholder=f"{month_label} 계획 메모를 작성하세요.\n\n💡 팁: '저장' 버튼을 눌러야 데이터가 보존됩니다.",
+                key=f"memo_input_{month_label}"
+            )
+
+            if st.button("💾 계획 저장", key=f"save_btn_plan_no_week_{month_label}"):
+                if memo_text and memo_text.strip():
+                    st.session_state[memo_key] = memo_text
+                    save_memo_to_file(memo_key, memo_text)
+                    st.success("✅ 계획이 저장되었습니다.")
+                    time.sleep(0.5)
+                    st.rerun()
+                else:
+                    st.warning("⚠️ 저장할 내용이 없습니다.")
+
+            if st.session_state.get(memo_key, ""):
+                with st.expander("📋 저장된 메모 보기", expanded=False):
+                    memo_content = html.escape(st.session_state[memo_key])
+                    memo_content = memo_content.replace('\n', '<br>')
+                    memo_display = f"<div style='white-space: pre-wrap; font-family: inherit; line-height: 1.5; padding: 0.5rem;'>{memo_content}</div>"
+                    st.markdown(memo_display, unsafe_allow_html=True)
         
         # 주차별 경영진 회의록 추가 (숨김 처리)
         # st.markdown('<span id="section_meeting" class="anchor"></span>', unsafe_allow_html=True)
