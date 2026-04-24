@@ -69,7 +69,7 @@ st.markdown("""
         <a class="nav-item" href="#section_target">📊 통계/현황</a>
         <a class="nav-item" href="#section_sales">📦 상품 분석</a>
         <a class="nav-item" href="#section_data_analysis">📈 데이터 분석</a>
-        <a class="nav-item" href="#section_plans">📝 파트별 계획</a>
+        <a class="nav-item" href="#section_plans">📝 차주 계획</a>
     </div>
     """, unsafe_allow_html=True)
 
