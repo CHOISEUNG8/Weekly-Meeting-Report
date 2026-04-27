@@ -2374,6 +2374,271 @@ if uploaded_file is not None:
                 st.plotly_chart(fig_profit_compare, use_container_width=True)
                 if group_note:
                     st.info(group_note)
+
+                # 4월 주차 기준(04/03~04/23) 삼성 vs 폐쇄몰 전년도/현재년도 비교 그래프 추가
+                april_compare_path = os.path.join(_script_dir, "2025 데이터.xlsx")
+                if not os.path.exists(april_compare_path):
+                    april_compare_path = "2025 데이터.xlsx"
+
+                if os.path.exists(april_compare_path):
+                    try:
+                        april_xls = pd.ExcelFile(april_compare_path)
+                        april_df = pd.read_excel(april_xls, sheet_name=april_xls.sheet_names[0])
+
+                        def find_col_by_candidates(df_cols, candidates, fallback_idx=None):
+                            for c in df_cols:
+                                c_str = str(c).strip().lower()
+                                for n in candidates:
+                                    n_str = str(n).strip().lower()
+                                    if n_str in c_str or c_str in n_str:
+                                        return c
+                            if fallback_idx is not None and len(df_cols) > fallback_idx:
+                                return df_cols[fallback_idx]
+                            return None
+
+                        april_cols = april_df.columns
+                        april_date_col = find_col_by_candidates(april_cols, ['주문일', '날짜', '일자', 'date'], 4)
+                        april_profit_col = find_col_by_candidates(april_cols, ['매출총이익', '매출이익', '이익금', '이익', 'profit'], 12)
+                        april_group_col = find_col_by_candidates(april_cols, ['구분', '플랫폼', '몰', 'channel', 'category'], 14)
+
+                        if april_date_col is not None and april_profit_col is not None:
+                            april_df[april_date_col] = pd.to_datetime(april_df[april_date_col], errors='coerce')
+                            april_df[april_profit_col] = pd.to_numeric(april_df[april_profit_col], errors='coerce').fillna(0)
+                            april_df = april_df[april_df[april_date_col].notna()].copy()
+
+                            if april_group_col is not None:
+                                april_group_series = april_df[april_group_col].astype(str).str.replace(' ', '', regex=False).str.lower()
+                            else:
+                                april_group_series = pd.Series([''] * len(april_df), index=april_df.index)
+
+                            april_df['_연도'] = april_df[april_date_col].dt.year
+                            available_years = sorted([int(y) for y in april_df['_연도'].dropna().unique()])
+
+                            # 현재년도는 주간회의록.xlsx에서 추출
+                            current_year = None
+                            meeting_path = os.path.join(_script_dir, "주간회의록.xlsx")
+                            if not os.path.exists(meeting_path):
+                                meeting_path = "주간회의록.xlsx"
+
+                            if os.path.exists(meeting_path):
+                                try:
+                                    meeting_xls = pd.ExcelFile(meeting_path)
+                                    meeting_df = pd.read_excel(meeting_xls, sheet_name=meeting_xls.sheet_names[0])
+                                    meeting_date_col = find_col_by_candidates(
+                                        meeting_df.columns,
+                                        ['주문일', '날짜', '일자', 'date', '주문 날짜'],
+                                        4
+                                    )
+                                    if meeting_date_col is not None:
+                                        meeting_dates = pd.to_datetime(meeting_df[meeting_date_col], errors='coerce')
+                                        meeting_years = sorted([int(y) for y in meeting_dates.dt.year.dropna().unique()])
+                                        if len(meeting_years) > 0:
+                                            current_year = meeting_years[-1]
+                                except Exception:
+                                    current_year = None
+
+                            if current_year is not None:
+                                previous_year = current_year - 1
+
+                                # 전년도 데이터(2025 데이터.xlsx)
+                                prev_df = april_df[april_df['_연도'] == previous_year].copy()
+                                prev_group_series = april_group_series.loc[prev_df.index] if len(prev_df) > 0 else pd.Series(dtype='object')
+
+                                # 현재년도 데이터(주간회의록.xlsx)
+                                current_df = None
+                                current_date_col = None
+                                current_profit_col = None
+                                current_group_col = None
+                                if 'meeting_df' in locals() and meeting_df is not None:
+                                    current_df = meeting_df.copy()
+                                    current_date_col = find_col_by_candidates(
+                                        current_df.columns,
+                                        ['주문일', '날짜', '일자', 'date', '주문 날짜'],
+                                        4
+                                    )
+                                    current_profit_col = find_col_by_candidates(
+                                        current_df.columns,
+                                        ['매출총이익', '매출이익', '이익금', '이익', 'profit'],
+                                        12
+                                    )
+                                    current_group_col = find_col_by_candidates(
+                                        current_df.columns,
+                                        ['구분', '플랫폼', '몰', 'channel', 'category'],
+                                        14
+                                    )
+                                    if current_date_col is not None and current_profit_col is not None:
+                                        current_df[current_date_col] = pd.to_datetime(current_df[current_date_col], errors='coerce')
+                                        current_df[current_profit_col] = pd.to_numeric(current_df[current_profit_col], errors='coerce').fillna(0)
+                                        current_df = current_df[(current_df[current_date_col].notna()) & (current_df[current_date_col].dt.year == current_year)].copy()
+                                    else:
+                                        current_df = None
+
+                                if previous_year in available_years and current_df is not None and len(current_df) > 0:
+                                    samsung_keys_april = ['삼성베네포유', '베네포유', '삼성카드몰', '카드몰', '삼성몰']
+
+                                    prev_group_norm = prev_group_series.astype(str).str.replace(' ', '', regex=False).str.lower() if len(prev_df) > 0 else pd.Series(dtype='object')
+                                    prev_samsung_mask = prev_group_norm.apply(lambda x: any(k in x for k in samsung_keys_april)) if len(prev_group_norm) > 0 else pd.Series(dtype=bool)
+                                    prev_closed_mall_mask = ~prev_samsung_mask if len(prev_samsung_mask) > 0 else pd.Series(dtype=bool)
+
+                                    if current_group_col is not None:
+                                        current_group_norm = current_df[current_group_col].astype(str).str.replace(' ', '', regex=False).str.lower()
+                                    else:
+                                        current_group_norm = pd.Series([''] * len(current_df), index=current_df.index)
+                                    current_samsung_mask = current_group_norm.apply(lambda x: any(k in x for k in samsung_keys_april))
+                                    current_closed_mall_mask = ~current_samsung_mask
+
+                                    april_week_ranges = [
+                                        ('4월 첫째주', (4, 3), (4, 9)),
+                                        ('4월 둘째주', (4, 10), (4, 16)),
+                                        ('4월 셋째주', (4, 17), (4, 23)),
+                                    ]
+
+                                    weekly_rows = []
+                                    prev_target_mask_total = pd.Series(False, index=prev_df.index)
+                                    curr_target_mask_total = pd.Series(False, index=current_df.index)
+                                    for week_label, (start_m, start_d), (end_m, end_d) in april_week_ranges:
+                                        curr_start = pd.Timestamp(year=current_year, month=start_m, day=start_d)
+                                        curr_end = pd.Timestamp(year=current_year, month=end_m, day=end_d)
+
+                                        # 전년도는 월/일 고정이 아닌 요일 패턴(예: 금~목)을 유지하도록 52주(364일) 이동
+                                        prev_start = curr_start - pd.Timedelta(days=364)
+                                        prev_end = curr_end - pd.Timedelta(days=364)
+
+                                        prev_week_mask = (prev_df[april_date_col] >= prev_start) & (prev_df[april_date_col] <= prev_end)
+                                        curr_week_mask = (current_df[current_date_col] >= curr_start) & (current_df[current_date_col] <= curr_end)
+                                        prev_target_mask_total = prev_target_mask_total | prev_week_mask
+                                        curr_target_mask_total = curr_target_mask_total | curr_week_mask
+
+                                        prev_samsung_profit = prev_df.loc[prev_week_mask & prev_samsung_mask, april_profit_col].sum(skipna=True)
+                                        prev_closed_profit = prev_df.loc[prev_week_mask & prev_closed_mall_mask, april_profit_col].sum(skipna=True)
+                                        curr_samsung_profit = current_df.loc[curr_week_mask & current_samsung_mask, current_profit_col].sum(skipna=True)
+                                        curr_closed_profit = current_df.loc[curr_week_mask & current_closed_mall_mask, current_profit_col].sum(skipna=True)
+
+                                        weekly_rows.extend([
+                                            {'주차': week_label, '연도': str(previous_year), '구분': '삼성(베네포유+카드몰)', '매출이익금': float(prev_samsung_profit) if pd.notna(prev_samsung_profit) else 0.0},
+                                            {'주차': week_label, '연도': str(previous_year), '구분': '폐쇄몰', '매출이익금': float(prev_closed_profit) if pd.notna(prev_closed_profit) else 0.0},
+                                            {'주차': week_label, '연도': str(current_year), '구분': '삼성(베네포유+카드몰)', '매출이익금': float(curr_samsung_profit) if pd.notna(curr_samsung_profit) else 0.0},
+                                            {'주차': week_label, '연도': str(current_year), '구분': '폐쇄몰', '매출이익금': float(curr_closed_profit) if pd.notna(curr_closed_profit) else 0.0},
+                                        ])
+
+                                    april_weekly_compare_df = pd.DataFrame(weekly_rows)
+                                    if len(april_weekly_compare_df) > 0:
+                                        april_weekly_compare_df['연도'] = pd.Categorical(
+                                            april_weekly_compare_df['연도'],
+                                            categories=[str(previous_year), str(current_year)],
+                                            ordered=True
+                                        )
+
+                                        fig_april_week_compare = px.bar(
+                                            april_weekly_compare_df,
+                                            x='주차',
+                                            y='매출이익금',
+                                            color='구분',
+                                            facet_col='연도',
+                                            facet_col_spacing=0.12,
+                                            barmode='group',
+                                            text='매출이익금',
+                                            title=f'4월 매출이익금 비교 (삼성 vs 폐쇄몰) - 전년도({previous_year}) vs 현재({current_year})',
+                                            color_discrete_map={
+                                                '삼성(베네포유+카드몰)': '#3B82F6',
+                                                '폐쇄몰': '#2E8B57',
+                                            },
+                                            category_orders={
+                                                '주차': ['4월 첫째주', '4월 둘째주', '4월 셋째주'],
+                                                '연도': [str(previous_year), str(current_year)],
+                                                '구분': ['삼성(베네포유+카드몰)', '폐쇄몰']
+                                            },
+                                        )
+                                        fig_april_week_compare.update_traces(
+                                            texttemplate='%{text:,.0f}원',
+                                            textposition='outside',
+                                            hovertemplate='<b>%{x}</b><br>%{fullData.name}<br>매출이익금: %{y:,.0f}원<extra></extra>',
+                                            cliponaxis=False
+                                        )
+                                        fig_april_week_compare.update_layout(
+                                            xaxis_title='4월 주차',
+                                            yaxis_title='매출이익금 (원)',
+                                            legend_title_text='구분',
+                                            bargap=0.28,
+                                            bargroupgap=0.18,
+                                            margin=dict(t=80, r=20, b=40, l=20),
+                                        )
+                                        fig_april_week_compare.for_each_annotation(
+                                            lambda a: a.update(text=a.text.replace("연도=", "") + "년")
+                                        )
+                                        fig_april_week_compare.update_yaxes(tickformat=',')
+                                        st.plotly_chart(fig_april_week_compare, use_container_width=True)
+                                        st.caption("집계 기준: 4월 첫째주(04/03~04/09), 둘째주(04/10~04/16), 셋째주(04/17~04/23)")
+
+                                        # 그래프 하단: 매출이익금 주요 아이템 표시
+                                        prev_item_col = find_col_by_candidates(
+                                            prev_df.columns if len(prev_df) > 0 else [],
+                                            ['상품명', '품명', '아이템', '상품', '제품명', 'product'],
+                                            2
+                                        ) if len(prev_df) > 0 else None
+                                        current_item_col = None
+                                        if len(current_df) > 0:
+                                            # 현재년도(주간회의록) 주요아이템은 단품명 우선 사용
+                                            current_item_col = find_col_by_candidates(
+                                                current_df.columns,
+                                                ['단품명', '단품', '옵션명', '옵션'],
+                                                None
+                                            )
+                                            if current_item_col is None:
+                                                current_item_col = find_col_by_candidates(
+                                                    current_df.columns,
+                                                    ['상품명', '품명', '아이템', '상품', '제품명', 'product'],
+                                                    2
+                                                )
+
+                                        def build_top_items_table(source_df, period_mask, group_mask, item_col, profit_col, year_label, group_label, top_n=5):
+                                            if source_df is None or len(source_df) == 0 or item_col is None:
+                                                return pd.DataFrame()
+                                            item_series = source_df[item_col].astype(str).str.strip()
+                                            valid_mask = period_mask & group_mask & item_series.notna() & (item_series != '') & (item_series != 'nan')
+                                            if valid_mask.sum() == 0:
+                                                return pd.DataFrame()
+                                            grouped = (
+                                                source_df.loc[valid_mask]
+                                                .assign(_아이템=item_series.loc[valid_mask])
+                                                .groupby('_아이템')[profit_col]
+                                                .sum()
+                                                .reset_index()
+                                                .sort_values(profit_col, ascending=False)
+                                                .head(top_n)
+                                            )
+                                            grouped.columns = ['주요아이템', '매출이익금']
+                                            grouped['연도'] = str(year_label)
+                                            grouped['구분'] = group_label
+                                            grouped = grouped[['연도', '구분', '주요아이템', '매출이익금']]
+                                            return grouped
+
+                                        major_items_frames = [
+                                            build_top_items_table(prev_df, prev_target_mask_total, prev_samsung_mask, prev_item_col, april_profit_col, previous_year, '삼성(베네포유+카드몰)'),
+                                            build_top_items_table(prev_df, prev_target_mask_total, prev_closed_mall_mask, prev_item_col, april_profit_col, previous_year, '폐쇄몰'),
+                                            build_top_items_table(current_df, curr_target_mask_total, current_samsung_mask, current_item_col, current_profit_col, current_year, '삼성(베네포유+카드몰)'),
+                                            build_top_items_table(current_df, curr_target_mask_total, current_closed_mall_mask, current_item_col, current_profit_col, current_year, '폐쇄몰'),
+                                        ]
+                                        major_items_frames = [x for x in major_items_frames if len(x) > 0]
+                                        if len(major_items_frames) > 0:
+                                            major_items_df = pd.concat(major_items_frames, ignore_index=True)
+                                            major_items_df['매출이익금'] = major_items_df['매출이익금'].fillna(0).astype(float)
+                                            major_items_df['매출이익금'] = major_items_df['매출이익금'].apply(lambda v: f"{v:,.0f}원")
+                                            st.markdown("##### 📌 매출이익금 주요 아이템 TOP 5 (4월 1~3주 기준)")
+                                            st.dataframe(major_items_df, use_container_width=True, hide_index=True)
+                                        else:
+                                            st.info("ℹ️ 주요 아이템을 표시할 상품 컬럼 또는 집계 데이터가 부족합니다.")
+                                        
+                                else:
+                                    st.info(f"ℹ️ 전년도({previous_year})는 2025 데이터.xlsx, 현재년도({current_year})는 주간회의록.xlsx 데이터 기준으로 계산 가능한 컬럼/데이터를 확인해주세요.")
+                            else:
+                                st.info("ℹ️ 주간회의록.xlsx에서 현재년도를 추출하지 못했습니다.")
+                        else:
+                            st.info("ℹ️ 2025 데이터.xlsx에서 주문일/매출이익금 컬럼을 찾지 못해 4월 주차 비교 그래프를 생성하지 못했습니다.")
+                    except Exception as april_compare_error:
+                        st.warning(f"⚠️ 4월 주차 비교 그래프 생성 중 오류 발생: {str(april_compare_error)}")
+                else:
+                    st.info("💡 '2025 데이터.xlsx' 파일을 스크립트와 같은 폴더에 넣어주세요.")
             else:
                 st.warning("⚠️ 플랫폼 컬럼(A열)을 찾을 수 없어 '삼성 vs 타 폐쇄몰 vs 2파트 폐쇄몰' 비교를 표시할 수 없습니다.")
         else:
