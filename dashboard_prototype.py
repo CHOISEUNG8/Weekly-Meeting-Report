@@ -3581,6 +3581,7 @@ if uploaded_file is not None:
                         save_memo_to_file(prev_memo_key, prev_text)
 
                 memo_key = f"memo_{month_label}_{selected_week_part}"
+                memo_input_key = f"memo_input_{month_label}_{selected_week_part}"
 
                 # 주차별로 독립적인 session_state 키 사용 (주차가 변경되면 항상 파일에서 불러오기)
                 current_week_state_key = f"current_week_{memo_key}"
@@ -3679,19 +3680,27 @@ https://elsupervision.com/default/
 
                     st.session_state[current_week_state_key] = True
                     st.session_state[last_week_key] = selected_week_part
+                    # 자동 생성/로드된 내용을 입력창에도 동기화하여 저장 버튼 클릭 시 그대로 저장되도록 보장
+                    st.session_state[memo_input_key] = st.session_state.get(memo_key, "")
 
                 memo_text = st.text_area(
                     f"메모를 입력하세요 ({selected_week_part})",
                     value=st.session_state.get(memo_key, ""),
                     height=220,
                     placeholder=f"{month_label} 계획 메모를 작성하세요 ({selected_week_part}).\n\n💡 팁: '저장' 버튼을 눌러야 데이터가 보존됩니다.",
-                    key=f"memo_input_{month_label}_{selected_week_part}"
+                    key=memo_input_key
                 )
 
                 if st.button(f"💾 {selected_week_part} 계획 저장", key=f"save_btn_plan_{selected_week_part}"):
-                    if memo_text and memo_text.strip():
-                        st.session_state[memo_key] = memo_text
-                        save_memo_to_file(memo_key, memo_text)
+                    # 버튼 클릭 시 위젯 최신값 우선, 없으면 자동 생성되어 있는 memo_key 값으로 저장
+                    save_target_text = st.session_state.get(memo_input_key, memo_text)
+                    if (not save_target_text or not str(save_target_text).strip()) and st.session_state.get(memo_key, ""):
+                        save_target_text = st.session_state.get(memo_key, "")
+
+                    if save_target_text and str(save_target_text).strip():
+                        st.session_state[memo_key] = save_target_text
+                        st.session_state[memo_input_key] = save_target_text
+                        save_memo_to_file(memo_key, save_target_text)
                         st.success(f"✅ {selected_week_part} 계획이 저장되었습니다.")
                         time.sleep(0.5)
                         st.rerun()
