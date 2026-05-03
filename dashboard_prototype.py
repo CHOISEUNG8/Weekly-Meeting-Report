@@ -515,20 +515,29 @@ if uploaded_file is not None:
             def week_to_korean_sidebar(week_num, min_week=None, month=None, max_week=None):
                 week_korean = ['첫째', '둘째', '셋째', '넷째', '다섯째']
                 month_label = f"{month}월" if month is not None else "월"
-                if min_week is not None:
+                if min_week is not None and pd.notna(week_num):
                     relative_week = week_num - min_week
+                    if pd.isna(relative_week):
+                        return None
+                    # numpy.float64 등 실수형 주차 인덱스를 안전하게 정수로 변환
+                    try:
+                        relative_week_int = int(relative_week)
+                    except (TypeError, ValueError):
+                        return None
+                    if abs(relative_week - relative_week_int) > 1e-9:
+                        return None
                     # 다섯째주는 실제 데이터에 존재할 때만 표시 (relative_week이 4인 경우만)
-                    if 0 <= relative_week < len(week_korean):
+                    if 0 <= relative_week_int < len(week_korean):
                         # 다섯째주(relative_week=4)인 경우, max_week을 확인하여 실제로 존재하는지 체크
-                        if relative_week == 4:
+                        if relative_week_int == 4:
                             # max_week이 min_week + 4 이상이어야 다섯째주가 존재
                             if max_week is not None and max_week >= min_week + 4:
-                                return f"{month_label} {week_korean[relative_week]}주"
+                                return f"{month_label} {week_korean[relative_week_int]}주"
                             else:
                                 # 다섯째주가 존재하지 않으면 None 반환 (표시하지 않음)
                                 return None
                         else:
-                            return f"{month_label} {week_korean[relative_week]}주"
+                            return f"{month_label} {week_korean[relative_week_int]}주"
                 return f"{month_label} {week_num}주"
             
             if selected_month is not None:
@@ -1540,20 +1549,28 @@ if uploaded_file is not None:
             """주차 번호를 한국어로 변환 (예: 45 -> '11월 첫째주' 또는 '12월 첫째주')"""
             week_korean = ['첫째', '둘째', '셋째', '넷째', '다섯째']
             month_label = f"{month}월" if month is not None else "월"
-            if min_week is not None:
+            if min_week is not None and pd.notna(week_num):
                 # 최소 주차를 기준으로 상대적 주차 계산
                 relative_week = week_num - min_week
-                if 0 <= relative_week < len(week_korean):
+                if pd.isna(relative_week):
+                    return None
+                try:
+                    relative_week_int = int(relative_week)
+                except (TypeError, ValueError):
+                    return None
+                if abs(relative_week - relative_week_int) > 1e-9:
+                    return None
+                if 0 <= relative_week_int < len(week_korean):
                     # 다섯째주는 실제 데이터에 존재할 때만 표시 (relative_week이 4인 경우만)
-                    if relative_week == 4:
+                    if relative_week_int == 4:
                         # max_week이 min_week + 4 이상이어야 다섯째주가 존재
                         if max_week is not None and max_week >= min_week + 4:
-                            return f"{month_label} {week_korean[relative_week]}주"
+                            return f"{month_label} {week_korean[relative_week_int]}주"
                         else:
                             # 다섯째주가 존재하지 않으면 None 반환 (표시하지 않음)
                             return None
                     else:
-                        return f"{month_label} {week_korean[relative_week]}주"
+                        return f"{month_label} {week_korean[relative_week_int]}주"
             return f"{month_label} {week_num}주"
         
         # 주간별 또는 일별 트렌드 (날짜 컬럼이 있는 경우)
