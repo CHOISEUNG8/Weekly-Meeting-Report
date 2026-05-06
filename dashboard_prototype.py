@@ -2586,7 +2586,6 @@ if uploaded_file is not None:
                                         )
                                         fig_april_week_compare.update_yaxes(tickformat=',')
                                         st.plotly_chart(fig_april_week_compare, use_container_width=True)
-                                        st.caption("집계 기준: 4월 첫째주(04/03~04/09), 둘째주(04/10~04/16), 셋째주(04/17~04/23), 넷째주(04/24~04/30)")
                                         
 
                                         # 그래프 하단: 매출이익금 주요 아이템 표시
