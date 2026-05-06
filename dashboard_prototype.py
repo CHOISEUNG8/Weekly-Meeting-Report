@@ -3717,7 +3717,6 @@ https://elsupervision.com/default/
 
                     if save_target_text and str(save_target_text).strip():
                         st.session_state[memo_key] = save_target_text
-                        st.session_state[memo_input_key] = save_target_text
                         save_memo_to_file(memo_key, save_target_text)
                         st.success(f"✅ {selected_week_part} 계획이 저장되었습니다.")
                         time.sleep(0.5)
