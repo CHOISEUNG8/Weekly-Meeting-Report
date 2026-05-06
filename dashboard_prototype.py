@@ -2508,6 +2508,7 @@ if uploaded_file is not None:
                                         ('4월 첫째주', (4, 3), (4, 9)),
                                         ('4월 둘째주', (4, 10), (4, 16)),
                                         ('4월 셋째주', (4, 17), (4, 23)),
+                                        ('4월 넷째주', (4, 24), (4, 30)),
                                     ]
 
                                     weekly_rows = []
@@ -2561,7 +2562,7 @@ if uploaded_file is not None:
                                                 '폐쇄몰': '#2E8B57',
                                             },
                                             category_orders={
-                                                '주차': ['4월 첫째주', '4월 둘째주', '4월 셋째주'],
+                                                '주차': [w[0] for w in april_week_ranges],
                                                 '연도': [str(previous_year), str(current_year)],
                                                 '구분': ['삼성(베네포유+카드몰)', '폐쇄몰']
                                             },
@@ -2585,6 +2586,7 @@ if uploaded_file is not None:
                                         )
                                         fig_april_week_compare.update_yaxes(tickformat=',')
                                         st.plotly_chart(fig_april_week_compare, use_container_width=True)
+                                        st.caption("집계 기준: 4월 첫째주(04/03~04/09), 둘째주(04/10~04/16), 셋째주(04/17~04/23), 넷째주(04/24~04/30)")
                                         
 
                                         # 그래프 하단: 매출이익금 주요 아이템 표시
