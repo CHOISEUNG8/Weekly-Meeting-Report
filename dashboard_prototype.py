@@ -2400,7 +2400,21 @@ if uploaded_file is not None:
                 if os.path.exists(april_compare_path):
                     try:
                         april_xls = pd.ExcelFile(april_compare_path)
-                        april_df = pd.read_excel(april_xls, sheet_name=april_xls.sheet_names[0])
+                        # 전년도 데이터는 선택 월(예: 5월)이 있으면 해당 월 시트를 우선 사용
+                        selected_compare_sheet = april_xls.sheet_names[0]
+                        target_month_for_prev = selected_month if selected_month is not None else None
+                        if target_month_for_prev is not None:
+                            target_month_str = str(int(target_month_for_prev))
+                            for sheet_name in april_xls.sheet_names:
+                                sheet_norm = str(sheet_name).strip().lower().replace(" ", "")
+                                if (
+                                    f"{target_month_str}월" in sheet_norm
+                                    or sheet_norm == target_month_str
+                                    or sheet_norm.startswith(f"{target_month_str}월")
+                                ):
+                                    selected_compare_sheet = sheet_name
+                                    break
+                        april_df = pd.read_excel(april_xls, sheet_name=selected_compare_sheet)
 
                         def find_col_by_candidates(df_cols, candidates, fallback_idx=None):
                             for c in df_cols:
@@ -2504,12 +2518,34 @@ if uploaded_file is not None:
                                     current_samsung_mask = current_group_norm.apply(lambda x: any(k in x for k in samsung_keys_april))
                                     current_closed_mall_mask = ~current_samsung_mask
 
+                                    target_month = selected_month
+                                    if target_month is None and current_date_col is not None and len(current_df) > 0:
+                                        month_candidates = sorted(current_df[current_date_col].dt.month.dropna().unique().tolist())
+                                        if len(month_candidates) == 1:
+                                            target_month = int(month_candidates[0])
+                                    if target_month is None:
+                                        target_month = 4
+                                    target_month = int(target_month)
+
                                     april_week_ranges = [
-                                        ('4월 첫째주', (4, 3), (4, 9)),
-                                        ('4월 둘째주', (4, 10), (4, 16)),
-                                        ('4월 셋째주', (4, 17), (4, 23)),
-                                        ('4월 넷째주', (4, 24), (4, 30)),
+                                        (f'{target_month}월 첫째주', (target_month, 3), (target_month, 9)),
+                                        (f'{target_month}월 둘째주', (target_month, 10), (target_month, 16)),
+                                        (f'{target_month}월 셋째주', (target_month, 17), (target_month, 23)),
+                                        (f'{target_month}월 넷째주', (target_month, 24), (target_month, 30)),
                                     ]
+
+                                    # 5주차는 고정 표시하지 않고, 해당 월 말(31일 구간)에 실제 데이터가 있을 때만 자동 확장
+                                    month_end_day = int((pd.Timestamp(year=current_year, month=target_month, day=1) + pd.offsets.MonthEnd(1)).day)
+                                    if month_end_day >= 31:
+                                        curr_5_start = pd.Timestamp(year=current_year, month=target_month, day=31)
+                                        curr_5_end = pd.Timestamp(year=current_year, month=target_month, day=month_end_day)
+                                        prev_5_start = curr_5_start - pd.Timedelta(days=364)
+                                        prev_5_end = curr_5_end - pd.Timedelta(days=364)
+
+                                        has_curr_5 = ((current_df[current_date_col] >= curr_5_start) & (current_df[current_date_col] <= curr_5_end)).any()
+                                        has_prev_5 = ((prev_df[april_date_col] >= prev_5_start) & (prev_df[april_date_col] <= prev_5_end)).any()
+                                        if bool(has_curr_5) or bool(has_prev_5):
+                                            april_week_ranges.append((f'{target_month}월 다섯째주', (target_month, 31), (target_month, month_end_day)))
 
                                     weekly_rows = []
                                     prev_target_mask_total = pd.Series(False, index=prev_df.index)
@@ -2551,20 +2587,20 @@ if uploaded_file is not None:
                                             april_weekly_compare_df,
                                             x='주차',
                                             y='매출이익금',
-                                            color='구분',
-                                            facet_col='연도',
+                                            color='연도',
+                                            facet_col='구분',
                                             facet_col_spacing=0.12,
                                             barmode='group',
                                             text='매출이익금',
-                                            title=f'4월 매출이익금 비교 (삼성 vs 폐쇄몰) - 전년도({previous_year}) vs 현재({current_year})',
+                                            title=f'{target_month}월 매출이익금 비교 (삼성 vs 폐쇄몰) - 전년도({previous_year}) vs 현재({current_year})',
                                             color_discrete_map={
-                                                '삼성(베네포유+카드몰)': '#3B82F6',
-                                                '폐쇄몰': '#2E8B57',
+                                                str(previous_year): '#7DAEDB',
+                                                str(current_year): '#3B82F6',
                                             },
                                             category_orders={
                                                 '주차': [w[0] for w in april_week_ranges],
-                                                '연도': [str(previous_year), str(current_year)],
-                                                '구분': ['삼성(베네포유+카드몰)', '폐쇄몰']
+                                                '구분': ['삼성(베네포유+카드몰)', '폐쇄몰'],
+                                                '연도': [str(previous_year), str(current_year)]
                                             },
                                         )
                                         fig_april_week_compare.update_traces(
@@ -2574,15 +2610,15 @@ if uploaded_file is not None:
                                             cliponaxis=False
                                         )
                                         fig_april_week_compare.update_layout(
-                                            xaxis_title='4월 주차',
+                                            xaxis_title=f'{target_month}월 주차',
                                             yaxis_title='매출이익금 (원)',
-                                            legend_title_text='구분',
+                                            legend_title_text='연도',
                                             bargap=0.28,
                                             bargroupgap=0.18,
                                             margin=dict(t=80, r=20, b=40, l=20),
                                         )
                                         fig_april_week_compare.for_each_annotation(
-                                            lambda a: a.update(text=a.text.replace("연도=", "") + "년")
+                                            lambda a: a.update(text=a.text.replace("구분=", ""))
                                         )
                                         fig_april_week_compare.update_yaxes(tickformat=',')
                                         st.plotly_chart(fig_april_week_compare, use_container_width=True)
@@ -2642,7 +2678,7 @@ if uploaded_file is not None:
                                             major_items_df = pd.concat(major_items_frames, ignore_index=True)
                                             major_items_df['매출이익금'] = major_items_df['매출이익금'].fillna(0).astype(float)
                                             major_items_df['매출이익금'] = major_items_df['매출이익금'].apply(lambda v: f"{v:,.0f}원")
-                                            st.markdown("##### 📌 매출이익금 주요 아이템 TOP 5 (4월 1~3주 기준)")
+                                            st.markdown(f"##### 📌 매출이익금 주요 아이템 TOP 5 ({target_month}월 1~{len(april_week_ranges)}주 기준)")
                                             st.dataframe(major_items_df, use_container_width=True, hide_index=True)
                                         else:
                                             st.info("ℹ️ 주요 아이템을 표시할 상품 컬럼 또는 집계 데이터가 부족합니다.")
@@ -2652,9 +2688,9 @@ if uploaded_file is not None:
                             else:
                                 st.info("ℹ️ 주간회의록.xlsx에서 현재년도를 추출하지 못했습니다.")
                         else:
-                            st.info("ℹ️ 2025 데이터.xlsx에서 주문일/매출이익금 컬럼을 찾지 못해 4월 주차 비교 그래프를 생성하지 못했습니다.")
+                            st.info("ℹ️ 2025 데이터.xlsx에서 주문일/매출이익금 컬럼을 찾지 못해 월별 주차 비교 그래프를 생성하지 못했습니다.")
                     except Exception as april_compare_error:
-                        st.warning(f"⚠️ 4월 주차 비교 그래프 생성 중 오류 발생: {str(april_compare_error)}")
+                        st.warning(f"⚠️ 월별 주차 비교 그래프 생성 중 오류 발생: {str(april_compare_error)}")
                 else:
                     st.info("💡 '2025 데이터.xlsx' 파일을 스크립트와 같은 폴더에 넣어주세요.")
             else:
