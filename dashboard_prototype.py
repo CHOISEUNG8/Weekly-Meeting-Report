@@ -2630,7 +2630,13 @@ if uploaded_file is not None:
                                             ['상품명', '품명', '아이템', '상품', '제품명', 'product'],
                                             2
                                         ) if len(prev_df) > 0 else None
+                                        prev_company_col = find_col_by_candidates(
+                                            prev_df.columns if len(prev_df) > 0 else [],
+                                            ['업체명', '업체', '제조사', '브랜드', 'company', 'maker', 'vendor'],
+                                            None
+                                        ) if len(prev_df) > 0 else None
                                         current_item_col = None
+                                        current_company_col = None
                                         if len(current_df) > 0:
                                             # 현재년도(주간회의록) 주요아이템은 단품명 우선 사용
                                             current_item_col = find_col_by_candidates(
@@ -2644,34 +2650,44 @@ if uploaded_file is not None:
                                                     ['상품명', '품명', '아이템', '상품', '제품명', 'product'],
                                                     2
                                                 )
+                                            current_company_col = find_col_by_candidates(
+                                                current_df.columns,
+                                                ['업체명', '업체', '제조사', '브랜드', 'company', 'maker', 'vendor'],
+                                                None
+                                            )
 
-                                        def build_top_items_table(source_df, period_mask, group_mask, item_col, profit_col, year_label, group_label, top_n=5):
+                                        def build_top_items_table(source_df, period_mask, group_mask, item_col, company_col, profit_col, year_label, group_label, top_n=5):
                                             if source_df is None or len(source_df) == 0 or item_col is None:
                                                 return pd.DataFrame()
                                             item_series = source_df[item_col].astype(str).str.strip()
                                             valid_mask = period_mask & group_mask & item_series.notna() & (item_series != '') & (item_series != 'nan')
                                             if valid_mask.sum() == 0:
                                                 return pd.DataFrame()
+                                            if company_col is not None and company_col in source_df.columns:
+                                                company_series = source_df[company_col].astype(str).str.strip()
+                                                company_series = company_series.replace({'': '-', 'nan': '-', 'None': '-'})
+                                            else:
+                                                company_series = pd.Series(['-'] * len(source_df), index=source_df.index)
                                             grouped = (
                                                 source_df.loc[valid_mask]
-                                                .assign(_아이템=item_series.loc[valid_mask])
-                                                .groupby('_아이템')[profit_col]
+                                                .assign(_업체명=company_series.loc[valid_mask], _아이템=item_series.loc[valid_mask])
+                                                .groupby(['_업체명', '_아이템'])[profit_col]
                                                 .sum()
                                                 .reset_index()
                                                 .sort_values(profit_col, ascending=False)
                                                 .head(top_n)
                                             )
-                                            grouped.columns = ['주요아이템', '매출이익금']
+                                            grouped.columns = ['업체명', '주요아이템', '매출이익금']
                                             grouped['연도'] = str(year_label)
                                             grouped['구분'] = group_label
-                                            grouped = grouped[['연도', '구분', '주요아이템', '매출이익금']]
+                                            grouped = grouped[['연도', '구분', '업체명', '주요아이템', '매출이익금']]
                                             return grouped
 
                                         major_items_frames = [
-                                            build_top_items_table(prev_df, prev_target_mask_total, prev_samsung_mask, prev_item_col, april_profit_col, previous_year, '삼성(베네포유+카드몰)'),
-                                            build_top_items_table(prev_df, prev_target_mask_total, prev_closed_mall_mask, prev_item_col, april_profit_col, previous_year, '폐쇄몰'),
-                                            build_top_items_table(current_df, curr_target_mask_total, current_samsung_mask, current_item_col, current_profit_col, current_year, '삼성(베네포유+카드몰)'),
-                                            build_top_items_table(current_df, curr_target_mask_total, current_closed_mall_mask, current_item_col, current_profit_col, current_year, '폐쇄몰'),
+                                            build_top_items_table(prev_df, prev_target_mask_total, prev_samsung_mask, prev_item_col, prev_company_col, april_profit_col, previous_year, '삼성(베네포유+카드몰)'),
+                                            build_top_items_table(prev_df, prev_target_mask_total, prev_closed_mall_mask, prev_item_col, prev_company_col, april_profit_col, previous_year, '폐쇄몰'),
+                                            build_top_items_table(current_df, curr_target_mask_total, current_samsung_mask, current_item_col, current_company_col, current_profit_col, current_year, '삼성(베네포유+카드몰)'),
+                                            build_top_items_table(current_df, curr_target_mask_total, current_closed_mall_mask, current_item_col, current_company_col, current_profit_col, current_year, '폐쇄몰'),
                                         ]
                                         major_items_frames = [x for x in major_items_frames if len(x) > 0]
                                         if len(major_items_frames) > 0:
@@ -3739,7 +3755,6 @@ https://elsupervision.com/default/
 
                 memo_text = st.text_area(
                     f"메모를 입력하세요 ({selected_week_part})",
-                    value=st.session_state.get(memo_key, ""),
                     height=220,
                     placeholder=f"{month_label} 계획 메모를 작성하세요 ({selected_week_part}).\n\n💡 팁: '저장' 버튼을 눌러야 데이터가 보존됩니다.",
                     key=memo_input_key
