@@ -2594,8 +2594,8 @@ if uploaded_file is not None:
                                             text='매출이익금',
                                             title=f'{target_month}월 매출이익금 비교 (삼성 vs 폐쇄몰) - 전년도({previous_year}) vs 현재({current_year})',
                                             color_discrete_map={
-                                                str(previous_year): '#7DAEDB',
-                                                str(current_year): '#3B82F6',
+                                                str(previous_year): '#1f77b4',
+                                                str(current_year): '#d62728',
                                             },
                                             category_orders={
                                                 '주차': [w[0] for w in april_week_ranges],
