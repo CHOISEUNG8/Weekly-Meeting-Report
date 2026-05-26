@@ -1724,55 +1724,32 @@ if uploaded_file is not None:
                         from plotly.subplots import make_subplots
                         fig_weekly = make_subplots(specs=[[{"secondary_y": True}]])
                         
-                        # 파스텔 톤 colorscale 정의
-                        pastel_blue = [[0, '#E8F4F8'], [0.5, '#B8E6F5'], [1, '#87CEEB']]
-                        pastel_green = [[0, '#E8F5E9'], [0.5, '#C8E6C9'], [1, '#A5D6A7']]
-                        
-                        # 총 판매수량 바 차트 (왼쪽 Y축) - 파스텔 톤 적용
+                        # 총 판매수량 바 차트 (왼쪽 Y축) - 가시성 높은 파랑
                         fig_weekly.add_trace(
                             go.Bar(
                                 x=weekly_combined['주차_한글'],
                                 y=weekly_combined['건수'],
                                 name='총 판매수량',
                                 marker=dict(
-                                    color=weekly_combined['건수'],
-                                    colorscale=pastel_blue,
-                                    showscale=True,
-                                    colorbar=dict(
-                                        title=dict(text="총 판매수량", side="right"),
-                                        x=1.25,
-                                        len=0.35,
-                                        y=0.7,
-                                        yanchor='middle',
-                                        thickness=15
-                                    )
+                                    color='#1F77FF'
                                 ),
                                 hovertemplate='<b>%{x}</b><br>총 판매수량: %{y}<extra></extra>'
                             ),
                             secondary_y=False,
                         )
                         
-                        # 매출이익금 라인 차트 (오른쪽 Y축) - 파스텔 톤 적용
+                        # 매출이익금 라인 차트 (오른쪽 Y축) - 가시성 높은 빨강
                         fig_weekly.add_trace(
                             go.Scatter(
                                 x=weekly_combined['주차_한글'],
                                 y=weekly_combined['매출이익금'],
                                 name='매출이익금',
                                 mode='lines+markers',
-                                line=dict(color='#A5D6A7', width=3),
+                                line=dict(color='#E53935', width=3),
                                 marker=dict(
                                     size=8,
-                                    color=weekly_combined['매출이익금'],
-                                    colorscale=pastel_green,
-                                    showscale=True,
-                                    colorbar=dict(
-                                        title=dict(text="매출이익금", side="right"),
-                                        x=1.25,
-                                        len=0.35,
-                                        y=0.25,
-                                        yanchor='middle',
-                                        thickness=15
-                                    )
+                                    color='#E53935',
+                                    line=dict(color='white', width=1)
                                 ),
                                 hovertemplate='<b>%{x}</b><br>매출이익금: %{y:,.0f}원<extra></extra>'
                             ),
@@ -1789,14 +1766,18 @@ if uploaded_file is not None:
                         fig_weekly.update_yaxes(
                             title_text="총 판매수량",
                             secondary_y=False,
-                            showgrid=True
+                            showgrid=True,
+                            title_font=dict(color='#1F77FF'),
+                            tickfont=dict(color='#1F77FF')
                         )
                         fig_weekly.update_yaxes(
                             title_text="매출이익금 (원)",
                             secondary_y=True,
                             tickformat=',',
                             showgrid=False,  # 오른쪽 Y축 그리드선 비활성화
-                            showticklabels=False  # 보조 Y축 눈금선 제거
+                            showticklabels=True,
+                            title_font=dict(color='#E53935'),
+                            tickfont=dict(color='#E53935')
                         )
                         # month_label 설정: selected_month가 있으면 사용, 없으면 필터링된 데이터에서 월 추출
                         if selected_month is not None:
@@ -1822,7 +1803,7 @@ if uploaded_file is not None:
                                 bordercolor='rgba(0,0,0,0.2)',
                                 borderwidth=1
                             ),
-                            margin=dict(r=250)  # 오른쪽 마진 대폭 증가 (컬러바 공간 확보)
+                            margin=dict(r=40)
                         )
                     else:
                         # 매출이익금이 없으면 총 판매수량만 표시
@@ -1870,58 +1851,36 @@ if uploaded_file is not None:
                         from plotly.subplots import make_subplots
                         fig_daily = make_subplots(specs=[[{"secondary_y": True}]])
                         
-                        # 파스텔 톤 colorscale 정의
-                        pastel_blue = [[0, '#E8F4F8'], [0.5, '#B8E6F5'], [1, '#87CEEB']]
-                        pastel_green = [[0, '#E8F5E9'], [0.5, '#C8E6C9'], [1, '#A5D6A7']]
-                        
-                        # 총 판매수량 라인 차트 (왼쪽 Y축) - 파스텔 톤 적용
+                        # 총 판매수량 라인 차트 (왼쪽 Y축) - 가시성 높은 파랑
                         fig_daily.add_trace(
                             go.Scatter(
                                 x=daily_combined['일'],
                                 y=daily_combined['건수'],
                                 name='총 판매수량',
                                 mode='lines+markers',
-                                line=dict(color='#87CEEB', width=2),
+                                line=dict(color='#1F77FF', width=3),
                                 marker=dict(
-                                    size=6,
-                                    color=daily_combined['건수'],
-                                    colorscale=pastel_blue,
-                                    showscale=True,
-                                    colorbar=dict(
-                                        title=dict(text="총 판매수량", side="right"),
-                                        x=1.25,
-                                        len=0.35,
-                                        y=0.7,
-                                        yanchor='middle',
-                                        thickness=15
-                                    )
+                                    size=8,
+                                    color='#1F77FF',
+                                    line=dict(color='white', width=1)
                                 ),
                                 hovertemplate='<b>일: %{x}</b><br>총 판매수량: %{y}<extra></extra>'
                             ),
                             secondary_y=False,
                         )
                         
-                        # 매출이익금 라인 차트 (오른쪽 Y축) - 파스텔 톤 적용
+                        # 매출이익금 라인 차트 (오른쪽 Y축) - 가시성 높은 빨강
                         fig_daily.add_trace(
                             go.Scatter(
                                 x=daily_combined['일'],
                                 y=daily_combined['매출이익금'],
                                 name='매출이익금',
                                 mode='lines+markers',
-                                line=dict(color='#A5D6A7', width=2),
+                                line=dict(color='#E53935', width=3),
                                 marker=dict(
-                                    size=6,
-                                    color=daily_combined['매출이익금'],
-                                    colorscale=pastel_green,
-                                    showscale=True,
-                                    colorbar=dict(
-                                        title=dict(text="매출이익금", side="right"),
-                                        x=1.25,
-                                        len=0.35,
-                                        y=0.25,
-                                        yanchor='middle',
-                                        thickness=15
-                                    )
+                                    size=8,
+                                    color='#E53935',
+                                    line=dict(color='white', width=1)
                                 ),
                                 hovertemplate='<b>일: %{x}</b><br>매출이익금: %{y:,.0f}원<extra></extra>'
                             ),
@@ -1936,14 +1895,18 @@ if uploaded_file is not None:
                         fig_daily.update_yaxes(
                             title_text="총 판매수량",
                             secondary_y=False,
-                            showgrid=True
+                            showgrid=True,
+                            title_font=dict(color='#1F77FF'),
+                            tickfont=dict(color='#1F77FF')
                         )
                         fig_daily.update_yaxes(
                             title_text="매출이익금 (원)",
                             secondary_y=True,
                             tickformat=',',
                             showgrid=False,  # 오른쪽 Y축 그리드선 비활성화
-                            showticklabels=False  # 보조 Y축 눈금선 제거
+                            showticklabels=True,
+                            title_font=dict(color='#E53935'),
+                            tickfont=dict(color='#E53935')
                         )
                         # month_label 설정: selected_month가 있으면 사용, 없으면 필터링된 데이터에서 월 추출
                         if selected_month is not None:
@@ -1969,7 +1932,7 @@ if uploaded_file is not None:
                                 bordercolor='rgba(0,0,0,0.2)',
                                 borderwidth=1
                             ),
-                            margin=dict(r=250)  # 오른쪽 마진 대폭 증가 (컬러바 공간 확보)
+                            margin=dict(r=40)
                         )
                     else:
                         # 매출이익금이 없으면 총 판매수량만 표시
@@ -2370,9 +2333,9 @@ if uploaded_file is not None:
                     title=f'{month_label} 매출이익금 비교 (삼성 vs 폐쇄몰)',
                     color='구분',
                     color_discrete_map={
-                        # 채도를 낮춘 부드러운 파스텔 톤
-                        '삼성(베네포유+카드몰)': '#A7C7E7',  # 소프트 파스텔 블루
-                        '폐쇄몰': '#BFE3C0',                 # 소프트 파스텔 그린
+                        # 가시성을 높이기 위해 파랑/빨강 대비 적용
+                        '삼성(베네포유+카드몰)': '#1F77FF',  # 선명한 파랑
+                        '폐쇄몰': '#E53935',                 # 선명한 빨강
                     }
                 )
                 fig_profit_compare.update_traces(
