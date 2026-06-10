@@ -3559,6 +3559,371 @@ if uploaded_file is not None:
         #         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         #     )
         
+        st.markdown("---")
+        st.subheader("🗂️ 마스터코드 쇼핑몰 등록 현황")
+
+        master_manage_path = os.path.join(_script_dir, "마스터관리.xlsx")
+        master_file_source = None
+        use_local_master = False
+
+        if os.path.exists(master_manage_path):
+            use_local_master = st.checkbox("로컬 파일 사용 (마스터관리.xlsx)", value=True, key="use_local_master_manage")
+            if use_local_master:
+                master_file_source = master_manage_path
+            else:
+                master_file_source = st.file_uploader(
+                    "마스터관리 파일 업로드",
+                    type=['xlsx', 'xls'],
+                    key='master_manage_upload'
+                )
+        else:
+            master_file_source = st.file_uploader(
+                "마스터관리 파일 업로드",
+                type=['xlsx', 'xls'],
+                key='master_manage_upload'
+            )
+
+        if master_file_source is not None:
+            try:
+                master_xls = pd.ExcelFile(master_file_source)
+                master_sheet_names = master_xls.sheet_names if master_xls.sheet_names else []
+
+                # 고정값: 마스터코드 시트를 우선 사용
+                selected_master_sheet = None
+                for sheet_name in master_sheet_names:
+                    sheet_norm_exact = str(sheet_name).strip().lower().replace(" ", "")
+                    if sheet_norm_exact == "마스터코드" or sheet_norm_exact == "mastercode":
+                        selected_master_sheet = sheet_name
+                        break
+
+                # 예외: 정확히 없으면 마스터/master 포함 시트로 대체
+                if selected_master_sheet is None:
+                    for sheet_name in master_sheet_names:
+                        sheet_norm = str(sheet_name).lower()
+                        if "마스터" in sheet_norm or "master" in sheet_norm:
+                            selected_master_sheet = sheet_name
+                            break
+
+                if selected_master_sheet is None:
+                    st.warning("⚠️ '마스터코드' 시트를 찾지 못했습니다. 파일 시트명을 확인해주세요.")
+                    st.stop()
+
+                master_df = pd.read_excel(master_xls, sheet_name=selected_master_sheet)
+
+                # 첫 행이 헤더가 아닌 경우(설명행/빈행) 자동 보정
+                unnamed_cols = [str(col).lower().startswith("unnamed") for col in master_df.columns]
+                unnamed_ratio = (sum(unnamed_cols) / len(unnamed_cols)) if len(unnamed_cols) > 0 else 0
+                if len(master_df) == 0 or unnamed_ratio >= 0.7:
+                    preview_df = pd.read_excel(master_xls, sheet_name=selected_master_sheet, header=None, nrows=20)
+
+                    def _normalize_for_header(value):
+                        value_str = str(value).strip().lower()
+                        for old, new in [(" ", ""), ("\n", ""), ("\r", ""), ("\t", ""), ("_", ""), ("-", "")]:
+                            value_str = value_str.replace(old, new)
+                        return value_str
+
+                    header_hints = [
+                        "마스터코드", "상품코드", "코드", "sku",
+                        "삼성복지", "삼성카드", "쿠팡", "11번가", "현대이지웰", "베네피아", "메가존"
+                    ]
+                    header_hints_norm = [_normalize_for_header(x) for x in header_hints]
+
+                    best_row_idx = None
+                    best_score = -1
+                    for row_idx in range(len(preview_df)):
+                        row_values = [_normalize_for_header(v) for v in preview_df.iloc[row_idx].tolist() if pd.notna(v)]
+                        score = 0
+                        for hint in header_hints_norm:
+                            if any(hint and (hint in cell or cell in hint) for cell in row_values):
+                                score += 1
+                        if score > best_score:
+                            best_score = score
+                            best_row_idx = row_idx
+
+                    if best_row_idx is not None and best_score >= 2:
+                        master_df = pd.read_excel(master_xls, sheet_name=selected_master_sheet, header=best_row_idx)
+
+                if len(master_df) == 0:
+                    st.warning(f"⚠️ '{selected_master_sheet}' 시트 데이터가 비어 있습니다.")
+                else:
+                    st.caption(f"로드 완료: 시트 `{selected_master_sheet}` · {len(master_df):,}행 / {len(master_df.columns):,}열")
+                    target_malls = [
+                        "삼성-복지", "삼성-카드", "쿠팡", "시노텍스", "애터미아자",
+                        "제니스월드", "제니스셀러", "ESM", "11번가", "오너클랜",
+                        "도매꾹", "알리", "롯데온", "올웨이즈", "토스", "엔비티", "인터엠디",
+                        "이제너두", "퍼스트복지몰", "풀무원", "티딜", "현대샵", "기아샵",
+                        "홈닉", "아이엠스쿨", "빌리지베이비", "톡스토어", "LG", "캐시딜",
+                        "제이슨딜", "유콕딜", "자연이랑", "메가존", "비즈마켓", "웰포인트",
+                        "네티웰", "이패밀리샵", "복지드림", "바로팜", "베네피아", "현대이지웰"
+                    ]
+
+                    mall_aliases = {
+                        "삼성-복지": ["삼성-복지", "삼성복지", "삼성 복지", "베네포유", "삼성베네포유"],
+                        "삼성-카드": ["삼성-카드", "삼성카드", "삼성 카드", "카드몰", "삼성카드몰"],
+                        "제니스월드": ["제니스월드", "네이버 제니스월드", "네이버제니스월드", "네이버월드"],
+                        "제니스셀러": ["제니스셀러", "네이버 제니스셀러", "네이버제니스셀러", "네이버셀러"],
+                        "ESM": ["ESM", "지마켓", "옥션"],
+                        "11번가": ["11번가", "11 번가", "십일번가", "11st"],
+                        "LG": ["LG", "엘지"],
+                    }
+
+                    def normalize_name(value):
+                        value_str = str(value).strip().lower()
+                        for old, new in [(" ", ""), ("\n", ""), ("\r", ""), ("\t", ""), ("_", ""), ("-", "")]:
+                            value_str = value_str.replace(old, new)
+                        return value_str
+
+                    def find_matching_column(df_columns, candidates):
+                        normalized_map = {normalize_name(col): col for col in df_columns}
+                        normalized_candidates = [normalize_name(c) for c in candidates]
+
+                        # 1) 완전 일치
+                        for cand in normalized_candidates:
+                            if cand in normalized_map:
+                                return normalized_map[cand]
+
+                        # 2) 포함 일치
+                        for cand in normalized_candidates:
+                            for norm_col, origin_col in normalized_map.items():
+                                if cand and (cand in norm_col or norm_col in cand):
+                                    return origin_col
+                        return None
+
+                    def filter_n_sale_type(df_target):
+                        """F/G열 기준으로 N(상시)만 필터링"""
+                        col_f = df_target.columns[5] if len(df_target.columns) > 5 else None  # F열
+                        col_g = df_target.columns[6] if len(df_target.columns) > 6 else None  # G열
+                        if col_f is None and col_g is None:
+                            return df_target.copy(), None
+
+                        def build_n_mask(series):
+                            norm = series.apply(normalize_name)
+                            return (
+                                (norm == "n")
+                                | (norm == "n(상시)")
+                                | (norm == "n상시")
+                                | (norm == "상시n")
+                                | (norm.str.contains("상시", na=False) & norm.str.contains("n", na=False))
+                            )
+
+                        mask_n_sangsi = pd.Series(False, index=df_target.index)
+                        used_cols = []
+
+                        if col_f is not None:
+                            mask_n_sangsi = mask_n_sangsi | build_n_mask(df_target[col_f])
+                            used_cols.append(f"F열({col_f})")
+                        if col_g is not None:
+                            mask_n_sangsi = mask_n_sangsi | build_n_mask(df_target[col_g])
+                            used_cols.append(f"G열({col_g})")
+
+                        return df_target[mask_n_sangsi].copy(), " / ".join(used_cols)
+
+                    def classify_status(raw_value):
+                        if pd.isna(raw_value):
+                            return "미등록"
+                        status_text = str(raw_value).strip()
+                        if status_text == "":
+                            return "미등록"
+
+                        status_norm = normalize_name(status_text)
+                        if "삭제" in status_norm:
+                            return "삭제"
+                        if "품절" in status_norm:
+                            return "품절"
+                        if "중지" in status_norm or "정지" in status_norm or "보류" in status_norm:
+                            return "중지"
+                        if "대기" in status_norm or "예정" in status_norm:
+                            return "대기"
+                        if "미등록" in status_norm or "미입점" in status_norm or "미노출" in status_norm:
+                            return "미등록"
+                        if "판매" in status_norm:
+                            return "판매"
+                        if "등록" in status_norm or "입점" in status_norm or "노출" in status_norm:
+                            return "등록"
+                        return "기타"
+
+                    def get_master_code_column(df_target):
+                        code_candidates = ["마스터코드", "master code", "mastercode", "상품코드", "코드", "sku"]
+                        for candidate in code_candidates:
+                            matched = find_matching_column(df_target.columns, [candidate])
+                            if matched is not None:
+                                return matched
+                        return None
+
+                    # 요청사항: 판매타입 N(상시)만 집계
+                    master_df, sale_type_filter_desc = filter_n_sale_type(master_df)
+                    if sale_type_filter_desc is not None:
+                        st.caption(f"필터 적용: {sale_type_filter_desc} 기준 N(상시)만 집계")
+                    else:
+                        st.warning("⚠️ F/G열을 찾지 못해 전체 데이터로 집계합니다.")
+
+                    if len(master_df) == 0:
+                        st.warning("⚠️ 판매타입 N(상시) 조건에 해당하는 데이터가 없습니다.")
+                        st.stop()
+
+                    mall_column_map = {}
+                    for mall in target_malls:
+                        candidates = [mall] + mall_aliases.get(mall, [])
+                        matched_col = find_matching_column(master_df.columns, candidates)
+                        if matched_col is not None:
+                            mall_column_map[mall] = matched_col
+
+                    if len(mall_column_map) == 0:
+                        st.warning("⚠️ 마스터관리.xlsx에서 지정한 쇼핑몰 컬럼(41개)을 찾지 못했습니다.")
+                        st.caption("컬럼명을 확인해주세요. 예: 삼성-복지, 삼성-카드, 쿠팡, 현대이지웰")
+                    else:
+                        ordered_status = ["판매", "등록", "미등록", "품절", "중지", "대기", "삭제", "기타"]
+                        register_set = {"판매", "등록"}
+
+                        summary_rows = []
+                        detail_rows = []
+
+                        for mall_name in target_malls:
+                            if mall_name not in mall_column_map:
+                                continue
+
+                            col_name = mall_column_map[mall_name]
+                            status_series = master_df[col_name].apply(classify_status)
+                            count_map = status_series.value_counts(dropna=False).to_dict()
+
+                            registered_count = int(count_map.get("판매", 0) + count_map.get("등록", 0))
+                            total_count = int(sum(count_map.values()))
+                            not_registered_count = int(total_count - registered_count)
+
+                            summary_rows.append({
+                                "쇼핑몰": mall_name,
+                                "등록상품수": registered_count,
+                                "비등록/기타수": not_registered_count,
+                                "전체상품수": total_count,
+                                "등록률(%)": round((registered_count / total_count * 100), 1) if total_count > 0 else 0.0
+                            })
+
+                            detail_row = {"쇼핑몰": mall_name}
+                            for status_key in ordered_status:
+                                detail_row[status_key] = int(count_map.get(status_key, 0))
+                            detail_rows.append(detail_row)
+
+                        summary_df = pd.DataFrame(summary_rows).sort_values("등록상품수", ascending=False).reset_index(drop=True)
+                        detail_df = pd.DataFrame(detail_rows).reset_index(drop=True)
+
+                        st.markdown("#### 📌 쇼핑몰별 등록 집계")
+                        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+
+                        fig_master_registered = px.bar(
+                            summary_df,
+                            x="쇼핑몰",
+                            y="등록상품수",
+                            title="쇼핑몰별 등록 상품 수",
+                            color="등록상품수",
+                            color_continuous_scale="Blues"
+                        )
+                        fig_master_registered.update_layout(
+                            xaxis_title="쇼핑몰",
+                            yaxis_title="등록 상품 수",
+                            xaxis_tickangle=-40,
+                            margin=dict(t=60, r=20, b=130, l=20)
+                        )
+                        st.plotly_chart(fig_master_registered, use_container_width=True)
+
+                        with st.expander("상태별 상세 집계 보기 (판매/등록/미등록/품절/중지/대기/삭제/기타)"):
+                            st.dataframe(detail_df, use_container_width=True, hide_index=True)
+
+                        st.markdown("#### ➕ 다음주 추가 등록 상품 수 (전주 대비)")
+                        st.caption("다음주 마스터관리 파일을 업로드하면, 쇼핑몰별로 '미등록/대기/기타 → 등록/판매' 전환된 상품 수를 계산합니다.")
+                        next_week_file = st.file_uploader(
+                            "다음주 마스터관리 파일 업로드",
+                            type=['xlsx', 'xls'],
+                            key='next_week_master_manage_upload'
+                        )
+
+                        if next_week_file is not None:
+                            try:
+                                next_master_df = pd.read_excel(next_week_file)
+                                next_master_df, _ = filter_n_sale_type(next_master_df)
+                                current_code_col = get_master_code_column(master_df)
+                                next_code_col = get_master_code_column(next_master_df)
+
+                                if current_code_col is None or next_code_col is None:
+                                    st.warning("⚠️ 마스터코드 컬럼(예: 마스터코드/상품코드)을 찾지 못해 다음주 증감 비교를 할 수 없습니다.")
+                                else:
+                                    current_code_df = master_df.copy()
+                                    next_code_df = next_master_df.copy()
+
+                                    current_code_df[current_code_col] = current_code_df[current_code_col].astype(str).str.strip()
+                                    next_code_df[next_code_col] = next_code_df[next_code_col].astype(str).str.strip()
+                                    current_code_df = current_code_df[current_code_df[current_code_col] != ""]
+                                    next_code_df = next_code_df[next_code_df[next_code_col] != ""]
+
+                                    next_added_rows = []
+                                    for mall_name in target_malls:
+                                        if mall_name not in mall_column_map:
+                                            continue
+
+                                        current_mall_col = mall_column_map[mall_name]
+                                        next_mall_col = find_matching_column(
+                                            next_code_df.columns,
+                                            [mall_name] + mall_aliases.get(mall_name, [])
+                                        )
+                                        if next_mall_col is None:
+                                            continue
+
+                                        merged_df = pd.merge(
+                                            current_code_df[[current_code_col, current_mall_col]],
+                                            next_code_df[[next_code_col, next_mall_col]],
+                                            left_on=current_code_col,
+                                            right_on=next_code_col,
+                                            how='outer'
+                                        )
+
+                                        current_status = merged_df[current_mall_col].apply(classify_status)
+                                        next_status = merged_df[next_mall_col].apply(classify_status)
+
+                                        added_count = int((~current_status.isin(register_set) & next_status.isin(register_set)).sum())
+                                        next_registered_count = int(next_status.isin(register_set).sum())
+
+                                        next_added_rows.append({
+                                            "쇼핑몰": mall_name,
+                                            "다음주 추가 등록 수": added_count,
+                                            "다음주 등록 총계": next_registered_count
+                                        })
+
+                                    if len(next_added_rows) > 0:
+                                        next_added_df = pd.DataFrame(next_added_rows).sort_values(
+                                            "다음주 추가 등록 수", ascending=False
+                                        ).reset_index(drop=True)
+                                        st.dataframe(next_added_df, use_container_width=True, hide_index=True)
+
+                                        fig_next_added = px.bar(
+                                            next_added_df,
+                                            x="쇼핑몰",
+                                            y="다음주 추가 등록 수",
+                                            title="쇼핑몰별 다음주 추가 등록 상품 수",
+                                            color="다음주 추가 등록 수",
+                                            color_continuous_scale="Reds"
+                                        )
+                                        fig_next_added.update_layout(
+                                            xaxis_title="쇼핑몰",
+                                            yaxis_title="추가 등록 수",
+                                            xaxis_tickangle=-40,
+                                            margin=dict(t=60, r=20, b=130, l=20)
+                                        )
+                                        st.plotly_chart(fig_next_added, use_container_width=True)
+                                    else:
+                                        st.info("ℹ️ 다음주 파일에서 비교 가능한 쇼핑몰 컬럼을 찾지 못했습니다.")
+                            except Exception as next_compare_error:
+                                st.warning(f"⚠️ 다음주 파일 비교 중 오류 발생: {str(next_compare_error)}")
+                        else:
+                            st.info("다음주 증감 비교를 하려면 '다음주 마스터관리 파일'을 업로드해주세요.")
+
+                        missing_malls = [mall for mall in target_malls if mall not in mall_column_map]
+                        if len(missing_malls) > 0:
+                            st.caption(f"미매칭 쇼핑몰 컬럼: {', '.join(missing_malls)}")
+
+            except Exception as master_error:
+                st.warning(f"⚠️ 마스터관리.xlsx 분석 중 오류 발생: {str(master_error)}")
+        else:
+            st.info("마스터관리.xlsx 파일을 불러오면 쇼핑몰별 등록 집계와 다음주 추가 등록 수 비교를 확인할 수 있습니다.")
+
         # 메모장 기능 추가 (월/주차별 저장)
         st.markdown('<span id="section_plans" class="anchor"></span>', unsafe_allow_html=True)
         st.markdown("---")
