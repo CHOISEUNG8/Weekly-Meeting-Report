@@ -378,7 +378,9 @@ if uploaded_file is not None:
                 continue
 
             raw_priority = 1 if 'raw' in sheet_lower else 0
-            score = (year, month, raw_priority)
+            # 현재 월 페이지를 우선 반영 (예: 6월에는 6월 시트 우선)
+            current_month_priority = 1 if (year == current_year and month == current_month) else 0
+            score = (current_month_priority, year, month, raw_priority)
             if best_score is None or score > best_score:
                 best_score = score
                 default_sheet_index = idx
