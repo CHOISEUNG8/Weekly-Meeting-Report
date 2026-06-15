@@ -2416,28 +2416,51 @@ if uploaded_file is not None:
                             april_df['_연도'] = april_df[april_date_col].dt.year
                             available_years = sorted([int(y) for y in april_df['_연도'].dropna().unique()])
 
-                            # 현재년도는 주간회의록.xlsx에서 추출
+                            # 현재년도는 현재 화면에서 이미 로드된 데이터(df/original_df)를 우선 사용
                             current_year = None
-                            meeting_path = os.path.join(_script_dir, "주간회의록.xlsx")
-                            if not os.path.exists(meeting_path):
-                                meeting_path = "주간회의록.xlsx"
+                            current_df = None
+                            current_date_col = None
+                            current_profit_col = None
+                            current_group_col = None
 
-                            if os.path.exists(meeting_path):
-                                try:
-                                    meeting_xls = pd.ExcelFile(meeting_path)
-                                    meeting_df = pd.read_excel(meeting_xls, sheet_name=meeting_xls.sheet_names[0])
-                                    meeting_date_col = find_col_by_candidates(
-                                        meeting_df.columns,
-                                        ['주문일', '날짜', '일자', 'date', '주문 날짜'],
-                                        4
-                                    )
-                                    if meeting_date_col is not None:
-                                        meeting_dates = pd.to_datetime(meeting_df[meeting_date_col], errors='coerce')
-                                        meeting_years = sorted([int(y) for y in meeting_dates.dt.year.dropna().unique()])
-                                        if len(meeting_years) > 0:
-                                            current_year = meeting_years[-1]
-                                except Exception:
-                                    current_year = None
+                            current_source_df = None
+                            if 'original_df' in locals() and original_df is not None and len(original_df) > 0:
+                                current_source_df = original_df.copy()
+                            elif df is not None and len(df) > 0:
+                                current_source_df = df.copy()
+
+                            if current_source_df is not None and len(current_source_df) > 0:
+                                current_date_col = find_col_by_candidates(
+                                    current_source_df.columns,
+                                    ['주문일', '날짜', '일자', 'date', '주문 날짜'],
+                                    4
+                                )
+                                current_profit_col = find_col_by_candidates(
+                                    current_source_df.columns,
+                                    ['매출총이익', '매출이익', '이익금', '이익', 'profit'],
+                                    12
+                                )
+                                current_group_col = find_col_by_candidates(
+                                    current_source_df.columns,
+                                    ['구분', '플랫폼', '몰', 'channel', 'category'],
+                                    14
+                                )
+
+                                if current_date_col is not None:
+                                    current_source_df[current_date_col] = pd.to_datetime(current_source_df[current_date_col], errors='coerce')
+                                    year_candidates = sorted([int(y) for y in current_source_df[current_date_col].dt.year.dropna().unique()])
+                                    if len(year_candidates) > 0:
+                                        current_year = year_candidates[-1]
+
+                                if current_year is not None and current_date_col is not None:
+                                    if current_profit_col is None and amount_col is not None and amount_col in current_source_df.columns:
+                                        current_profit_col = amount_col
+                                    if current_profit_col is not None:
+                                        current_source_df[current_profit_col] = pd.to_numeric(current_source_df[current_profit_col], errors='coerce').fillna(0)
+                                        current_df = current_source_df[
+                                            (current_source_df[current_date_col].notna())
+                                            & (current_source_df[current_date_col].dt.year == current_year)
+                                        ].copy()
 
                             if current_year is not None:
                                 previous_year = current_year - 1
@@ -2445,35 +2468,6 @@ if uploaded_file is not None:
                                 # 전년도 데이터(2025 데이터.xlsx)
                                 prev_df = april_df[april_df['_연도'] == previous_year].copy()
                                 prev_group_series = april_group_series.loc[prev_df.index] if len(prev_df) > 0 else pd.Series(dtype='object')
-
-                                # 현재년도 데이터(주간회의록.xlsx)
-                                current_df = None
-                                current_date_col = None
-                                current_profit_col = None
-                                current_group_col = None
-                                if 'meeting_df' in locals() and meeting_df is not None:
-                                    current_df = meeting_df.copy()
-                                    current_date_col = find_col_by_candidates(
-                                        current_df.columns,
-                                        ['주문일', '날짜', '일자', 'date', '주문 날짜'],
-                                        4
-                                    )
-                                    current_profit_col = find_col_by_candidates(
-                                        current_df.columns,
-                                        ['매출총이익', '매출이익', '이익금', '이익', 'profit'],
-                                        12
-                                    )
-                                    current_group_col = find_col_by_candidates(
-                                        current_df.columns,
-                                        ['구분', '플랫폼', '몰', 'channel', 'category'],
-                                        14
-                                    )
-                                    if current_date_col is not None and current_profit_col is not None:
-                                        current_df[current_date_col] = pd.to_datetime(current_df[current_date_col], errors='coerce')
-                                        current_df[current_profit_col] = pd.to_numeric(current_df[current_profit_col], errors='coerce').fillna(0)
-                                        current_df = current_df[(current_df[current_date_col].notna()) & (current_df[current_date_col].dt.year == current_year)].copy()
-                                    else:
-                                        current_df = None
 
                                 if previous_year in available_years and current_df is not None and len(current_df) > 0:
                                     samsung_keys_april = ['삼성베네포유', '베네포유', '삼성카드몰', '카드몰', '삼성몰']
