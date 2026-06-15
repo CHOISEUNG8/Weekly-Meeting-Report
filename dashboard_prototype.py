@@ -984,7 +984,7 @@ if uploaded_file is not None:
         delta_total = total_achieved - total_target
 
         # 담당자별 상세 보기용 집계 (P열 담당자명 매칭, 월 전체 목표를 균등 3분할하여 달성율 계산)
-        DETAIL_MANAGER_NAMES = ("김영희", "박성호", "장연주")
+        DETAIL_MANAGER_NAMES = ("공석", "박성호", "장연주")
         manager_detail_stats = []
         if manager_col_for_part is not None and amount_col is not None:
             mgr_series = df_target[manager_col_for_part]
