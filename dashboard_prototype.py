@@ -14,6 +14,8 @@ import os
 import html
 import time
 import shutil
+import re
+from io import BytesIO
 
 # 페이지 설정
 st.set_page_config(
@@ -322,6 +324,7 @@ if uploaded_file is not None:
         # 가장 최근 년/월 시트를 기본으로 선택 (동일 월이면 raw 우선)
         def detect_sheet_year_month(sheet_name):
             sheet_lower = sheet_name.lower()
+            sheet_compact = str(sheet_name).strip().lower().replace(" ", "")
 
             year = None
             for y in [current_year + 1, current_year, current_year - 1, current_year - 2]:
@@ -332,25 +335,32 @@ if uploaded_file is not None:
                 year = current_year
 
             month = None
-            if '12월' in sheet_name or ('12' in sheet_name and '월' in sheet_name) or 'december' in sheet_lower or 'dec' in sheet_lower:
+
+            # 한글 월 표기 우선 파싱 (예: "2026년 5월 raw"에서 5월을 정확히 인식)
+            month_matches = re.findall(r'(1[0-2]|[1-9])\s*월', str(sheet_name))
+            if len(month_matches) > 0:
+                month = int(month_matches[-1])
+            elif sheet_compact in [str(i) for i in range(1, 13)]:
+                month = int(sheet_compact)
+            elif '12월' in sheet_name or 'december' in sheet_lower or 'dec' in sheet_lower:
                 month = 12
-            elif '11월' in sheet_name or ('11' in sheet_name and '월' in sheet_name) or 'november' in sheet_lower or 'nov' in sheet_lower:
+            elif '11월' in sheet_name or 'november' in sheet_lower or 'nov' in sheet_lower:
                 month = 11
-            elif '10월' in sheet_name or ('10' in sheet_name and '월' in sheet_name) or 'october' in sheet_lower or 'oct' in sheet_lower:
+            elif '10월' in sheet_name or 'october' in sheet_lower or 'oct' in sheet_lower:
                 month = 10
-            elif '9월' in sheet_name or ('9' in sheet_name and '월' in sheet_name) or 'september' in sheet_lower or 'sep' in sheet_lower:
+            elif '9월' in sheet_name or 'september' in sheet_lower or 'sep' in sheet_lower:
                 month = 9
-            elif '8월' in sheet_name or ('8' in sheet_name and '월' in sheet_name) or 'august' in sheet_lower or 'aug' in sheet_lower:
+            elif '8월' in sheet_name or 'august' in sheet_lower or 'aug' in sheet_lower:
                 month = 8
-            elif '7월' in sheet_name or ('7' in sheet_name and '월' in sheet_name) or 'july' in sheet_lower or 'jul' in sheet_lower:
+            elif '7월' in sheet_name or 'july' in sheet_lower or 'jul' in sheet_lower:
                 month = 7
-            elif '6월' in sheet_name or ('6' in sheet_name and '월' in sheet_name) or 'june' in sheet_lower or 'jun' in sheet_lower:
+            elif '6월' in sheet_name or 'june' in sheet_lower or 'jun' in sheet_lower:
                 month = 6
-            elif '5월' in sheet_name or ('5' in sheet_name and '월' in sheet_name) or 'may' in sheet_lower:
+            elif '5월' in sheet_name or 'may' in sheet_lower:
                 month = 5
-            elif '4월' in sheet_name or ('4' in sheet_name and '월' in sheet_name) or 'april' in sheet_lower or 'apr' in sheet_lower:
+            elif '4월' in sheet_name or 'april' in sheet_lower or 'apr' in sheet_lower:
                 month = 4
-            elif '3월' in sheet_name or ('3' in sheet_name and '월' in sheet_name) or 'march' in sheet_lower or 'mar' in sheet_lower:
+            elif '3월' in sheet_name or 'march' in sheet_lower or 'mar' in sheet_lower:
                 month = 3
             elif '2월' in sheet_name or 'february' in sheet_lower or 'feb' in sheet_lower:
                 month = 2
@@ -390,18 +400,11 @@ if uploaded_file is not None:
             and ('3월' in selected_sheet)
         )
         
-        # 선택된 시트에서 월 정보 추출
+        # 선택된 시트에서 월 정보 추출 (1~12월 전체 지원)
         selected_month = None
-        if '1월' in selected_sheet and '11' not in selected_sheet and '12' not in selected_sheet:
-            selected_month = 1
-        elif '2월' in selected_sheet or 'february' in selected_sheet.lower() or 'feb' in selected_sheet.lower():
-            selected_month = 2
-        elif '3월' in selected_sheet or ('3' in selected_sheet and '월' in selected_sheet):
-            selected_month = 3
-        elif '12월' in selected_sheet or ('12' in selected_sheet and '월' in selected_sheet):
-            selected_month = 12
-        elif '11월' in selected_sheet or ('11' in selected_sheet and '월' in selected_sheet):
-            selected_month = 11
+        _, detected_month = detect_sheet_year_month(selected_sheet)
+        if detected_month is not None:
+            selected_month = int(detected_month)
         
         # 스마트공장 시트인지 확인
         is_smart_factory = False
@@ -437,18 +440,21 @@ if uploaded_file is not None:
                 df['월'] = df[date_col].dt.month
                 df['년월'] = df[date_col].dt.to_period('M')
 
-                # raw 시트는 B열(주문월)을 월 기준으로 우선 반영
+                # raw 시트는 B열(주문월)을 참고하되, 표기 월은 시트명 월(selected_month)을 우선 반영
                 order_month_series = None
                 if len(df.columns) > 1:
                     b_col = df.columns[1]  # B열
                     order_month_series = pd.to_numeric(df[b_col], errors='coerce')
                     if order_month_series.between(1, 12).sum() > 0:
                         df['주문월'] = order_month_series
-                        if is_raw_selected_sheet:
+                        if is_raw_selected_sheet and selected_month is None:
                             df['월'] = order_month_series
                 
-                # 예외 적용: 2026년 3월 raw는 모든 행을 3월로 강제
-                if force_march_for_2026_march_raw:
+                # raw 시트는 시트명 기준 월을 강제 적용 (예: "2026년 5월 raw"는 5월 표기)
+                if is_raw_selected_sheet and selected_month is not None:
+                    df['월'] = int(selected_month)
+                # 하위 호환: 기존 2026년 3월 raw 예외 규칙 유지
+                elif force_march_for_2026_march_raw:
                     df['월'] = 3
                 
                 # 선택된 월 데이터만 필터링 (11월 또는 12월)
@@ -2484,10 +2490,10 @@ if uploaded_file is not None:
                                     target_month = selected_month
                                     if target_month is None and current_date_col is not None and len(current_df) > 0:
                                         month_candidates = sorted(current_df[current_date_col].dt.month.dropna().unique().tolist())
-                                        if len(month_candidates) == 1:
-                                            target_month = int(month_candidates[0])
+                                        if len(month_candidates) >= 1:
+                                            target_month = int(month_candidates[-1])
                                     if target_month is None:
-                                        target_month = 4
+                                        target_month = int(pd.Timestamp.now().month)
                                     target_month = int(target_month)
 
                                     april_week_ranges = [
@@ -3561,6 +3567,7 @@ if uploaded_file is not None:
         
         st.markdown("---")
         st.subheader("🗂️ 마스터코드 쇼핑몰 등록 현황")
+        fast_mode_master = st.checkbox("⚡ 빠른 모드(고정 포맷 우선)", value=True, key="master_fast_mode")
 
         master_manage_path = os.path.join(_script_dir, "마스터관리.xlsx")
         master_file_source = None
@@ -3585,68 +3592,96 @@ if uploaded_file is not None:
 
         if master_file_source is not None:
             try:
-                master_xls = pd.ExcelFile(master_file_source)
-                master_sheet_names = master_xls.sheet_names if master_xls.sheet_names else []
+                def to_excel_payload(file_source):
+                    """로컬 경로/업로드 파일을 캐시 가능한 payload로 변환."""
+                    if isinstance(file_source, str):
+                        version = os.path.getmtime(file_source) if os.path.exists(file_source) else 0
+                        return ("path", file_source, version)
+                    try:
+                        return ("bytes", file_source.getvalue(), 0)
+                    except Exception:
+                        return ("bytes", bytes(file_source.read()), 0)
 
-                # 고정값: 마스터코드 시트를 우선 사용
-                selected_master_sheet = None
-                for sheet_name in master_sheet_names:
-                    sheet_norm_exact = str(sheet_name).strip().lower().replace(" ", "")
-                    if sheet_norm_exact == "마스터코드" or sheet_norm_exact == "mastercode":
-                        selected_master_sheet = sheet_name
-                        break
+                @st.cache_data(show_spinner=False)
+                def load_master_like_dataframe_cached(source_kind, source_value, source_version, fast_mode=True):
+                    """마스터 형태 파일을 빠르게 로드 (필요 시 fallback)."""
+                    excel_source = source_value if source_kind == "path" else BytesIO(source_value)
+                    xls_obj = pd.ExcelFile(excel_source)
+                    sheet_names = xls_obj.sheet_names if xls_obj.sheet_names else []
 
-                # 예외: 정확히 없으면 마스터/master 포함 시트로 대체
-                if selected_master_sheet is None:
-                    for sheet_name in master_sheet_names:
-                        sheet_norm = str(sheet_name).lower()
-                        if "마스터" in sheet_norm or "master" in sheet_norm:
-                            selected_master_sheet = sheet_name
+                    selected_sheet = None
+                    for sheet_name in sheet_names:
+                        sheet_norm_exact = str(sheet_name).strip().lower().replace(" ", "")
+                        if sheet_norm_exact == "마스터코드" or sheet_norm_exact == "mastercode":
+                            selected_sheet = sheet_name
                             break
+                    if selected_sheet is None:
+                        for sheet_name in sheet_names:
+                            sheet_norm = str(sheet_name).lower()
+                            if "마스터" in sheet_norm or "master" in sheet_norm:
+                                selected_sheet = sheet_name
+                                break
+                    if selected_sheet is None and len(sheet_names) > 0:
+                        selected_sheet = sheet_names[0]
 
-                if selected_master_sheet is None:
+                    if selected_sheet is None:
+                        return None, None, "fail"
+
+                    # 빠른 모드: 헤더 1행 고정으로 바로 로드
+                    if fast_mode:
+                        df_fast = pd.read_excel(xls_obj, sheet_name=selected_sheet, header=0)
+                        unnamed_cols_fast = [str(col).lower().startswith("unnamed") for col in df_fast.columns]
+                        unnamed_ratio_fast = (sum(unnamed_cols_fast) / len(unnamed_cols_fast)) if len(unnamed_cols_fast) > 0 else 0
+                        if len(df_fast) > 0 and unnamed_ratio_fast < 0.7:
+                            return df_fast, selected_sheet, "fast"
+
+                    # fallback: 헤더 행 자동 탐지
+                    df_loaded = pd.read_excel(xls_obj, sheet_name=selected_sheet, header=0)
+                    unnamed_cols = [str(col).lower().startswith("unnamed") for col in df_loaded.columns]
+                    unnamed_ratio = (sum(unnamed_cols) / len(unnamed_cols)) if len(unnamed_cols) > 0 else 0
+                    if len(df_loaded) == 0 or unnamed_ratio >= 0.7:
+                        preview_df = pd.read_excel(xls_obj, sheet_name=selected_sheet, header=None, nrows=30)
+                        header_hints = [
+                            "마스터코드", "상품코드", "코드", "sku",
+                            "삼성복지", "삼성카드", "쿠팡", "11번가", "현대이지웰", "베네피아", "메가존"
+                        ]
+                        header_hints_norm = [str(x).strip().lower().replace(" ", "").replace("\n", "").replace("\r", "").replace("\t", "").replace("_", "").replace("-", "") for x in header_hints]
+
+                        best_row_idx = None
+                        best_score = -1
+                        for row_idx in range(len(preview_df)):
+                            row_values = [
+                                str(v).strip().lower().replace(" ", "").replace("\n", "").replace("\r", "").replace("\t", "").replace("_", "").replace("-", "")
+                                for v in preview_df.iloc[row_idx].tolist()
+                                if pd.notna(v)
+                            ]
+                            score = 0
+                            for hint in header_hints_norm:
+                                if any(hint and (hint in cell or cell in hint) for cell in row_values):
+                                    score += 1
+                            if score > best_score:
+                                best_score = score
+                                best_row_idx = row_idx
+
+                        if best_row_idx is not None and best_score >= 2:
+                            df_loaded = pd.read_excel(xls_obj, sheet_name=selected_sheet, header=best_row_idx)
+
+                    return df_loaded, selected_sheet, "fallback"
+
+                master_payload = to_excel_payload(master_file_source)
+                master_df, selected_master_sheet, master_load_mode = load_master_like_dataframe_cached(
+                    master_payload[0], master_payload[1], master_payload[2], fast_mode=fast_mode_master
+                )
+
+                if master_df is None or selected_master_sheet is None:
                     st.warning("⚠️ '마스터코드' 시트를 찾지 못했습니다. 파일 시트명을 확인해주세요.")
                     st.stop()
-
-                master_df = pd.read_excel(master_xls, sheet_name=selected_master_sheet)
-
-                # 첫 행이 헤더가 아닌 경우(설명행/빈행) 자동 보정
-                unnamed_cols = [str(col).lower().startswith("unnamed") for col in master_df.columns]
-                unnamed_ratio = (sum(unnamed_cols) / len(unnamed_cols)) if len(unnamed_cols) > 0 else 0
-                if len(master_df) == 0 or unnamed_ratio >= 0.7:
-                    preview_df = pd.read_excel(master_xls, sheet_name=selected_master_sheet, header=None, nrows=20)
-
-                    def _normalize_for_header(value):
-                        value_str = str(value).strip().lower()
-                        for old, new in [(" ", ""), ("\n", ""), ("\r", ""), ("\t", ""), ("_", ""), ("-", "")]:
-                            value_str = value_str.replace(old, new)
-                        return value_str
-
-                    header_hints = [
-                        "마스터코드", "상품코드", "코드", "sku",
-                        "삼성복지", "삼성카드", "쿠팡", "11번가", "현대이지웰", "베네피아", "메가존"
-                    ]
-                    header_hints_norm = [_normalize_for_header(x) for x in header_hints]
-
-                    best_row_idx = None
-                    best_score = -1
-                    for row_idx in range(len(preview_df)):
-                        row_values = [_normalize_for_header(v) for v in preview_df.iloc[row_idx].tolist() if pd.notna(v)]
-                        score = 0
-                        for hint in header_hints_norm:
-                            if any(hint and (hint in cell or cell in hint) for cell in row_values):
-                                score += 1
-                        if score > best_score:
-                            best_score = score
-                            best_row_idx = row_idx
-
-                    if best_row_idx is not None and best_score >= 2:
-                        master_df = pd.read_excel(master_xls, sheet_name=selected_master_sheet, header=best_row_idx)
 
                 if len(master_df) == 0:
                     st.warning(f"⚠️ '{selected_master_sheet}' 시트 데이터가 비어 있습니다.")
                 else:
-                    st.caption(f"로드 완료: 시트 `{selected_master_sheet}` · {len(master_df):,}행 / {len(master_df.columns):,}열")
+                    mode_text = "빠른 모드" if master_load_mode == "fast" else "자동보정 모드"
+                    st.caption(f"로드 완료: 시트 `{selected_master_sheet}` · {len(master_df):,}행 / {len(master_df.columns):,}열 ({mode_text})")
                     target_malls = [
                         "삼성-복지", "삼성-카드", "쿠팡", "시노텍스", "애터미아자",
                         "제니스월드", "제니스셀러", "ESM", "11번가", "오너클랜",
@@ -3689,8 +3724,26 @@ if uploaded_file is not None:
                                     return origin_col
                         return None
 
+                    def build_mall_column_map(df_target, min_match_threshold=12):
+                        """쇼핑몰 컬럼 매핑. 헤더 매칭이 부족하면 열 순서(A~AO) fallback 사용."""
+                        map_by_name = {}
+                        for mall in target_malls:
+                            candidates = [mall] + mall_aliases.get(mall, [])
+                            matched_col = find_matching_column(df_target.columns, candidates)
+                            if matched_col is not None:
+                                map_by_name[mall] = matched_col
+
+                        # 파일 헤더가 깨진 경우, 앞 41개 열이 쇼핑몰 순서라고 가정하여 fallback
+                        if len(map_by_name) < min_match_threshold and len(df_target.columns) >= len(target_malls):
+                            positional_map = {}
+                            for idx, mall in enumerate(target_malls):
+                                positional_map[mall] = df_target.columns[idx]
+                            return positional_map, "positional"
+
+                        return map_by_name, "name"
+
                     def filter_n_sale_type(df_target):
-                        """F/G열 기준으로 N(상시)만 필터링"""
+                        """F/G열이 실제 판매타입 컬럼일 때만 N(상시) 필터링"""
                         col_f = df_target.columns[5] if len(df_target.columns) > 5 else None  # F열
                         col_g = df_target.columns[6] if len(df_target.columns) > 6 else None  # G열
                         if col_f is None and col_g is None:
@@ -3715,6 +3768,11 @@ if uploaded_file is not None:
                         if col_g is not None:
                             mask_n_sangsi = mask_n_sangsi | build_n_mask(df_target[col_g])
                             used_cols.append(f"G열({col_g})")
+
+                        matched_count = int(mask_n_sangsi.sum())
+                        # F/G열에서 N(상시)를 전혀 찾지 못하면 해당 파일은 상태 매트릭스일 가능성이 높아 필터를 비활성화
+                        if matched_count == 0:
+                            return df_target.copy(), "필터 미적용(F/G열 N(상시) 값 없음)"
 
                         return df_target[mask_n_sangsi].copy(), " / ".join(used_cols)
 
@@ -3748,12 +3806,23 @@ if uploaded_file is not None:
                             matched = find_matching_column(df_target.columns, [candidate])
                             if matched is not None:
                                 return matched
+                        # 느슨한 패턴 매칭 (헤더 변형 대응)
+                        for col in df_target.columns:
+                            col_norm = normalize_name(col)
+                            if (("마스터" in col_norm and "코드" in col_norm)
+                                or ("상품" in col_norm and "코드" in col_norm)
+                                or ("master" in col_norm and "code" in col_norm)
+                                or ("sku" in col_norm)):
+                                return col
                         return None
 
                     # 요청사항: 판매타입 N(상시)만 집계
                     master_df, sale_type_filter_desc = filter_n_sale_type(master_df)
                     if sale_type_filter_desc is not None:
-                        st.caption(f"필터 적용: {sale_type_filter_desc} 기준 N(상시)만 집계")
+                        if "필터 미적용" in str(sale_type_filter_desc):
+                            st.caption(str(sale_type_filter_desc))
+                        else:
+                            st.caption(f"필터 적용: {sale_type_filter_desc} 기준 N(상시)만 집계")
                     else:
                         st.warning("⚠️ F/G열을 찾지 못해 전체 데이터로 집계합니다.")
 
@@ -3761,12 +3830,9 @@ if uploaded_file is not None:
                         st.warning("⚠️ 판매타입 N(상시) 조건에 해당하는 데이터가 없습니다.")
                         st.stop()
 
-                    mall_column_map = {}
-                    for mall in target_malls:
-                        candidates = [mall] + mall_aliases.get(mall, [])
-                        matched_col = find_matching_column(master_df.columns, candidates)
-                        if matched_col is not None:
-                            mall_column_map[mall] = matched_col
+                    mall_column_map, master_map_mode = build_mall_column_map(master_df)
+                    if master_map_mode == "positional":
+                        st.caption("ℹ️ 마스터 파일 컬럼명을 정확히 찾지 못해 열 순서 기준(A~AO)으로 매핑했습니다.")
 
                     if len(mall_column_map) == 0:
                         st.warning("⚠️ 마스터관리.xlsx에서 지정한 쇼핑몰 컬럼(41개)을 찾지 못했습니다.")
@@ -3838,78 +3904,105 @@ if uploaded_file is not None:
 
                         if next_week_file is not None:
                             try:
-                                next_master_df = pd.read_excel(next_week_file)
+                                next_payload = to_excel_payload(next_week_file)
+                                next_master_df, selected_next_sheet, next_load_mode = load_master_like_dataframe_cached(
+                                    next_payload[0], next_payload[1], next_payload[2], fast_mode=fast_mode_master
+                                )
+                                if next_master_df is None or selected_next_sheet is None:
+                                    st.warning("⚠️ 다음주 파일에서 사용할 시트를 찾지 못했습니다.")
+                                    st.stop()
+
                                 next_master_df, _ = filter_n_sale_type(next_master_df)
+                                next_mode_text = "빠른 모드" if next_load_mode == "fast" else "자동보정 모드"
+                                st.caption(f"다음주 파일 로드: 시트 `{selected_next_sheet}` · {len(next_master_df):,}행 ({next_mode_text})")
                                 current_code_col = get_master_code_column(master_df)
                                 next_code_col = get_master_code_column(next_master_df)
 
-                                if current_code_col is None or next_code_col is None:
-                                    st.warning("⚠️ 마스터코드 컬럼(예: 마스터코드/상품코드)을 찾지 못해 다음주 증감 비교를 할 수 없습니다.")
-                                else:
-                                    current_code_df = master_df.copy()
-                                    next_code_df = next_master_df.copy()
+                                use_row_fallback = (current_code_col is None or next_code_col is None)
+                                if use_row_fallback:
+                                    st.warning("⚠️ 다음주 파일에 마스터코드 컬럼이 없어 행 순서 기준으로 비교합니다.")
 
+                                current_code_df = master_df.copy()
+                                next_code_df = next_master_df.copy()
+
+                                if not use_row_fallback:
                                     current_code_df[current_code_col] = current_code_df[current_code_col].astype(str).str.strip()
                                     next_code_df[next_code_col] = next_code_df[next_code_col].astype(str).str.strip()
                                     current_code_df = current_code_df[current_code_df[current_code_col] != ""]
                                     next_code_df = next_code_df[next_code_df[next_code_col] != ""]
 
-                                    next_added_rows = []
-                                    for mall_name in target_malls:
-                                        if mall_name not in mall_column_map:
-                                            continue
+                                next_mall_column_map, next_map_mode = build_mall_column_map(next_code_df)
+                                if next_map_mode == "positional":
+                                    st.caption("ℹ️ 다음주 파일 컬럼명을 정확히 찾지 못해 열 순서 기준(A~AO)으로 매핑했습니다.")
 
-                                        current_mall_col = mall_column_map[mall_name]
-                                        next_mall_col = find_matching_column(
-                                            next_code_df.columns,
-                                            [mall_name] + mall_aliases.get(mall_name, [])
-                                        )
-                                        if next_mall_col is None:
-                                            continue
+                                next_added_rows = []
+                                for mall_name in target_malls:
+                                    if mall_name not in mall_column_map:
+                                        continue
 
-                                        merged_df = pd.merge(
-                                            current_code_df[[current_code_col, current_mall_col]],
-                                            next_code_df[[next_code_col, next_mall_col]],
-                                            left_on=current_code_col,
-                                            right_on=next_code_col,
-                                            how='outer'
-                                        )
+                                    current_mall_col = mall_column_map[mall_name]
+                                    next_mall_col = next_mall_column_map.get(mall_name)
+                                    if next_mall_col is None:
+                                        continue
 
-                                        current_status = merged_df[current_mall_col].apply(classify_status)
-                                        next_status = merged_df[next_mall_col].apply(classify_status)
-
+                                    if use_row_fallback:
+                                        current_status_raw = current_code_df[current_mall_col].reset_index(drop=True)
+                                        next_status_raw = next_code_df[next_mall_col].reset_index(drop=True)
+                                        max_len = max(len(current_status_raw), len(next_status_raw))
+                                        current_status = current_status_raw.reindex(range(max_len)).apply(classify_status)
+                                        next_status = next_status_raw.reindex(range(max_len)).apply(classify_status)
                                         added_count = int((~current_status.isin(register_set) & next_status.isin(register_set)).sum())
                                         next_registered_count = int(next_status.isin(register_set).sum())
-
-                                        next_added_rows.append({
-                                            "쇼핑몰": mall_name,
-                                            "다음주 추가 등록 수": added_count,
-                                            "다음주 등록 총계": next_registered_count
-                                        })
-
-                                    if len(next_added_rows) > 0:
-                                        next_added_df = pd.DataFrame(next_added_rows).sort_values(
-                                            "다음주 추가 등록 수", ascending=False
-                                        ).reset_index(drop=True)
-                                        st.dataframe(next_added_df, use_container_width=True, hide_index=True)
-
-                                        fig_next_added = px.bar(
-                                            next_added_df,
-                                            x="쇼핑몰",
-                                            y="다음주 추가 등록 수",
-                                            title="쇼핑몰별 다음주 추가 등록 상품 수",
-                                            color="다음주 추가 등록 수",
-                                            color_continuous_scale="Reds"
-                                        )
-                                        fig_next_added.update_layout(
-                                            xaxis_title="쇼핑몰",
-                                            yaxis_title="추가 등록 수",
-                                            xaxis_tickangle=-40,
-                                            margin=dict(t=60, r=20, b=130, l=20)
-                                        )
-                                        st.plotly_chart(fig_next_added, use_container_width=True)
                                     else:
-                                        st.info("ℹ️ 다음주 파일에서 비교 가능한 쇼핑몰 컬럼을 찾지 못했습니다.")
+                                        # 메모리 폭증 방지: merge 대신 코드별 등록 집합(set) 비교
+                                        prev_codes_series = current_code_df[current_code_col].astype(str).str.strip()
+                                        next_codes_series = next_code_df[next_code_col].astype(str).str.strip()
+                                        prev_status_series = current_code_df[current_mall_col].apply(classify_status)
+                                        next_status_series = next_code_df[next_mall_col].apply(classify_status)
+
+                                        prev_registered_codes = set(
+                                            prev_codes_series[
+                                                prev_codes_series.ne("") & prev_status_series.isin(register_set)
+                                            ].tolist()
+                                        )
+                                        next_registered_codes = set(
+                                            next_codes_series[
+                                                next_codes_series.ne("") & next_status_series.isin(register_set)
+                                            ].tolist()
+                                        )
+
+                                        added_count = int(len(next_registered_codes - prev_registered_codes))
+                                        next_registered_count = int(len(next_registered_codes))
+
+                                    next_added_rows.append({
+                                        "쇼핑몰": mall_name,
+                                        "다음주 추가 등록 수": added_count,
+                                        "다음주 등록 총계": next_registered_count
+                                    })
+
+                                if len(next_added_rows) > 0:
+                                    next_added_df = pd.DataFrame(next_added_rows).sort_values(
+                                        "다음주 추가 등록 수", ascending=False
+                                    ).reset_index(drop=True)
+                                    st.dataframe(next_added_df, use_container_width=True, hide_index=True)
+
+                                    fig_next_added = px.bar(
+                                        next_added_df,
+                                        x="쇼핑몰",
+                                        y="다음주 추가 등록 수",
+                                        title="쇼핑몰별 다음주 추가 등록 상품 수",
+                                        color="다음주 추가 등록 수",
+                                        color_continuous_scale="Reds"
+                                    )
+                                    fig_next_added.update_layout(
+                                        xaxis_title="쇼핑몰",
+                                        yaxis_title="추가 등록 수",
+                                        xaxis_tickangle=-40,
+                                        margin=dict(t=60, r=20, b=130, l=20)
+                                    )
+                                    st.plotly_chart(fig_next_added, use_container_width=True)
+                                else:
+                                    st.info("ℹ️ 다음주 파일에서 비교 가능한 쇼핑몰 컬럼을 찾지 못했습니다.")
                             except Exception as next_compare_error:
                                 st.warning(f"⚠️ 다음주 파일 비교 중 오류 발생: {str(next_compare_error)}")
                         else:
