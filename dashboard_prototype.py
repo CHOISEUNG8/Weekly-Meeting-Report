@@ -2729,18 +2729,15 @@ if uploaded_file is not None:
         if len(category_columns) > 0:
             category_col = st.selectbox("분류 기준 선택", category_columns, key='category_select')
             
-            # 파트별 분석 (전체, 1파트, 2파트)
+            # 파트별 분석: 전체만 표시
             if part_col and part_col in df.columns:
-                # 파트별 탭 생성
-                part_tabs_analysis = st.tabs(["전체", "1파트", "2파트"])
+                # 전체 탭만 생성
+                part_tabs_analysis = st.tabs(["전체"])
                 
-                for tab_idx, part_name in enumerate(["전체", "1파트", "2파트"]):
+                for tab_idx, part_name in enumerate(["전체"]):
                     with part_tabs_analysis[tab_idx]:
                         # 파트별 데이터 필터링
-                        if part_name == "전체":
-                            df_part = df.copy()
-                        else:
-                            df_part = df[df[part_col].astype(str).str.contains(part_name.replace('파트', ''), na=False, regex=False)]
+                        df_part = df.copy()
                         
                         if len(df_part) == 0:
                             st.info(f"{part_name} 데이터가 없습니다.")
@@ -3916,9 +3913,28 @@ if uploaded_file is not None:
                                 current_code_col = get_master_code_column(master_df)
                                 next_code_col = get_master_code_column(next_master_df)
 
-                                use_row_fallback = (current_code_col is None or next_code_col is None)
+                                def has_usable_code_data(df_target, code_col):
+                                    if code_col is None or code_col not in df_target.columns:
+                                        return False
+                                    code_series = df_target[code_col].astype(str).str.strip()
+                                    code_series = code_series[
+                                        code_series.ne("")
+                                        & code_series.str.lower().ne("nan")
+                                        & code_series.str.lower().ne("none")
+                                        & code_series.str.lower().ne("null")
+                                    ]
+                                    if len(code_series) == 0:
+                                        return False
+                                    unique_count = int(code_series.nunique())
+                                    min_unique_threshold = max(20, int(len(df_target) * 0.01))
+                                    return unique_count >= min_unique_threshold
+
+                                current_code_usable = has_usable_code_data(master_df, current_code_col)
+                                next_code_usable = has_usable_code_data(next_master_df, next_code_col)
+
+                                use_row_fallback = not (current_code_usable and next_code_usable)
                                 if use_row_fallback:
-                                    st.warning("⚠️ 다음주 파일에 마스터코드 컬럼이 없어 행 순서 기준으로 비교합니다.")
+                                    st.warning("⚠️ 마스터코드/상품코드 데이터가 부족해 행 순서 기준으로 비교합니다.")
 
                                 current_code_df = master_df.copy()
                                 next_code_df = next_master_df.copy()
