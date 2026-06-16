@@ -2492,34 +2492,36 @@ if uploaded_file is not None:
                                         target_month = int(pd.Timestamp.now().month)
                                     target_month = int(target_month)
 
-                                    april_week_ranges = [
-                                        (f'{target_month}월 첫째주', (target_month, 3), (target_month, 9)),
-                                        (f'{target_month}월 둘째주', (target_month, 10), (target_month, 16)),
-                                        (f'{target_month}월 셋째주', (target_month, 17), (target_month, 23)),
-                                        (f'{target_month}월 넷째주', (target_month, 24), (target_month, 30)),
-                                    ]
+                                    # 앱 전체와 동일하게 "금~목" 기준으로 월 주차 구간 생성
+                                    week_korean_labels = ['첫째', '둘째', '셋째', '넷째', '다섯째']
+                                    month_first_day = pd.Timestamp(year=current_year, month=target_month, day=1)
+                                    days_to_prev_friday = (month_first_day.weekday() - 4) % 7
+                                    first_week_start = month_first_day - pd.Timedelta(days=days_to_prev_friday)
 
-                                    # 5주차는 고정 표시하지 않고, 해당 월 말(31일 구간)에 실제 데이터가 있을 때만 자동 확장
-                                    month_end_day = int((pd.Timestamp(year=current_year, month=target_month, day=1) + pd.offsets.MonthEnd(1)).day)
-                                    if month_end_day >= 31:
-                                        curr_5_start = pd.Timestamp(year=current_year, month=target_month, day=31)
-                                        curr_5_end = pd.Timestamp(year=current_year, month=target_month, day=month_end_day)
-                                        prev_5_start = curr_5_start - pd.Timedelta(days=364)
-                                        prev_5_end = curr_5_end - pd.Timedelta(days=364)
+                                    april_week_ranges = []
+                                    for idx, label in enumerate(week_korean_labels):
+                                        curr_start = first_week_start + pd.Timedelta(days=idx * 7)
+                                        curr_end = curr_start + pd.Timedelta(days=6)
 
-                                        has_curr_5 = ((current_df[current_date_col] >= curr_5_start) & (current_df[current_date_col] <= curr_5_end)).any()
-                                        has_prev_5 = ((prev_df[april_date_col] >= prev_5_start) & (prev_df[april_date_col] <= prev_5_end)).any()
-                                        if bool(has_curr_5) or bool(has_prev_5):
-                                            april_week_ranges.append((f'{target_month}월 다섯째주', (target_month, 31), (target_month, month_end_day)))
+                                        # 시작일(금요일)이 target_month인 구간만 해당 월 주차로 사용
+                                        if curr_start.month != target_month:
+                                            continue
+
+                                        # 실제 데이터가 있는 주차만 포함
+                                        prev_start = curr_start - pd.Timedelta(days=364)
+                                        prev_end = curr_end - pd.Timedelta(days=364)
+                                        has_curr = ((current_df[current_date_col] >= curr_start) & (current_df[current_date_col] <= curr_end)).any()
+                                        has_prev = ((prev_df[april_date_col] >= prev_start) & (prev_df[april_date_col] <= prev_end)).any()
+                                        if bool(has_curr) or bool(has_prev):
+                                            april_week_ranges.append(
+                                                (f'{target_month}월 {label}주', curr_start, curr_end)
+                                            )
 
                                     weekly_rows = []
                                     prev_target_mask_total = pd.Series(False, index=prev_df.index)
                                     curr_target_mask_total = pd.Series(False, index=current_df.index)
-                                    for week_label, (start_m, start_d), (end_m, end_d) in april_week_ranges:
-                                        curr_start = pd.Timestamp(year=current_year, month=start_m, day=start_d)
-                                        curr_end = pd.Timestamp(year=current_year, month=end_m, day=end_d)
-
-                                        # 전년도는 월/일 고정이 아닌 요일 패턴(예: 금~목)을 유지하도록 52주(364일) 이동
+                                    for week_label, curr_start, curr_end in april_week_ranges:
+                                        # 전년도도 동일 요일 패턴(금~목) 유지를 위해 52주(364일) 이동
                                         prev_start = curr_start - pd.Timedelta(days=364)
                                         prev_end = curr_end - pd.Timedelta(days=364)
 
